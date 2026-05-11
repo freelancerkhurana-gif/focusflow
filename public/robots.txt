@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /
+
+# Allow all search engines to crawl the entire site
+# This ensures FocusFlow appears in search results for:
+# - Pomodoro Timer
+# - FocusFlow
+# - Focus Pomodoro
+# - Productivity Timer
+# - Deep Work Timer
+# - White Noise Generator
+# - Monitor Test
+# - And related productivity tools
+
+Sitemap: https://your-domain.com/sitemap.xml
