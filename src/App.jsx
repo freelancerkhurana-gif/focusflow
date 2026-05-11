@@ -174,7 +174,7 @@ function ThemeToggle({ themeMode, setThemeMode, T }) {
 /* ═══════════════════════════════════════════
    MAIN COMPONENT
 ═══════════════════════════════════════════ */
-export default function FocusFlow() {
+export default function Pomodoros() {
 
   /* ── THEME ── */
   const [themeMode, setThemeMode] = useState(()=>localStorage.getItem(LS_KEYS.themeMode)||"dark");
@@ -252,11 +252,11 @@ export default function FocusFlow() {
 
   /* ── TAB TITLE ── */
   useEffect(()=>{
-    const h=()=>{document.title=document.hidden&&running?`${fmt(secsLeft)}`:"FocusFlow — Deep Work Timer";};
+    const h=()=>{document.title=document.hidden&&running?`${fmt(secsLeft)}`:"Pomodoros — Deep Work Timer";};
     document.addEventListener("visibilitychange",h); return ()=>document.removeEventListener("visibilitychange",h);
   },[secsLeft,running]);
   useEffect(()=>{
-    document.title=document.hidden&&running?`${fmt(secsLeft)}`:"FocusFlow — Deep Work Timer";
+    document.title=document.hidden&&running?`${fmt(secsLeft)}`:"Pomodoros — Deep Work Timer";
   },[secsLeft,running]);
 
   /* ── TIMER ── */
@@ -409,7 +409,7 @@ export default function FocusFlow() {
           <Shield size={14} color={T.accent}/>
           <div>
             <div style={{ fontSize:11,letterSpacing:3,color:T.accent }}>PRO USER ACTIVATED</div>
-            <div style={{ fontSize:9,color:T.textDim,letterSpacing:1,marginTop:2 }}>FocusFlow installed · Works offline</div>
+            <div style={{ fontSize:9,color:T.textDim,letterSpacing:1,marginTop:2 }}>Pomodoros installed · Works offline</div>
           </div>
         </div>
       )}
@@ -436,7 +436,65 @@ export default function FocusFlow() {
           {/* Swatches */}
           <div style={{ display:"flex",flexWrap:"wrap",gap:12,justifyContent:"center",maxWidth:"min(400px,80vw)",padding:"0 20px" }}>
             {WASH_MODES.map((w,gi)=>(
-              <button key={w.label} onClick={()=>setWashIdx(gi)}
+              <button key={w.label} onClick={()=>{
+                const newWindow = window.open('', '_blank');
+                newWindow.document.write(`
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <title>${w.label} - Pomodoros</title>
+                      <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                        body { 
+                          background: ${w.bg}; 
+                          color: ${w.text}; 
+                          font-family: 'Share Tech Mono', monospace;
+                          display: flex; 
+                          align-items: center; 
+                          justify-content: center; 
+                          height: 100vh; 
+                          overflow: hidden;
+                        }
+                        .info {
+                          position: absolute;
+                          top: 20px;
+                          left: 50%;
+                          transform: translateX(-50%);
+                          background: rgba(0,0,0,0.8);
+                          color: ${w.text};
+                          padding: 8px 16px;
+                          border-radius: 4px;
+                          font-size: 12px;
+                          letter-spacing: 1px;
+                          opacity: 1;
+                          transition: opacity 0.5s ease;
+                        }
+                      </style>
+                    </head>
+                    <body>
+                      <div class="info">Press ESC to exit</div>
+                      <script>
+                        document.addEventListener('keydown', (e) => {
+                          if (e.key === 'Escape') {
+                            window.close();
+                          }
+                        });
+                        setTimeout(() => {
+                          document.querySelector('.info').style.opacity = '0';
+                        }, 3000);
+                      </script>
+                    </body>
+                  </html>
+                `);
+                newWindow.document.close();
+                if (newWindow.document.documentElement.requestFullscreen) {
+                  newWindow.document.documentElement.requestFullscreen();
+                } else if (newWindow.document.documentElement.webkitRequestFullscreen) {
+                  newWindow.document.documentElement.webkitRequestFullscreen();
+                } else if (newWindow.document.documentElement.msRequestFullscreen) {
+                  newWindow.document.documentElement.msRequestFullscreen();
+                }
+              }}
                 style={{ width:"clamp(80px,15vw,100px)",height:"clamp(60px,12vw,80px)",background:w.bg,border:gi===washIdx?`3px solid ${w.text}`:`2px solid ${w.text}33`,borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:"0 0 5px",boxShadow:gi===washIdx?`0 0 18px ${w.text}44`:undefined,transition:"all 0.15s",outline:"none" }}>
                   <span style={{ fontSize:"clamp(8px,2vw,10px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
                 </button>
@@ -452,7 +510,7 @@ export default function FocusFlow() {
         <header style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:28,flexWrap:"wrap",gap:"12px" }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
             <div style={{ width:8,height:8,borderRadius:"50%",background:T.accent,boxShadow:`0 0 10px ${T.accent}`,animation:"pulse 2s ease-in-out infinite" }}/>
-            <span style={{ fontFamily:"'Syne','Share Tech Mono',monospace",fontWeight:800,fontSize:18,color:T.accent,letterSpacing:-0.5 }}>FocusFlow</span>
+            <span style={{ fontFamily:"'Syne','Share Tech Mono',monospace",fontWeight:800,fontSize:18,color:T.accent,letterSpacing:-0.5 }}>Pomodoros</span>
             {isInstalled&&(
               <div style={{ display:"flex",alignItems:"center",gap:4,padding:"2px 6px",border:`1px solid ${T.border}`,borderRadius:2,background:T.accentFaint }}>
                 <Shield size={8} color={T.accent}/><span style={{ fontSize:7,letterSpacing:2,color:T.accent }}>PRO</span>
@@ -499,10 +557,10 @@ export default function FocusFlow() {
                 </button>
               ))}
             </div>
-            <div style={{ position:"relative",width:"clamp(200px,40vw,240px)",height:"clamp(200px,40vw,240px)" }}>
+            <div style={{ position:"relative",width:"clamp(280px,50vw,320px)",height:"clamp(280px,50vw,320px)" }}>
               <div style={{ position:"absolute",inset:0,borderRadius:"50%",...S.timerRing(pct),padding:8,transition:"background 0.5s linear" }}>
                 <div style={{ background:T.bg,borderRadius:"50%",width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4 }}>
-                  <span style={{ fontSize:"clamp(32px,6vw,52px)",color:T.accent,letterSpacing:-2,...S.glow }}>{fmt(secsLeft)}</span>
+                  <span style={{ fontSize:"clamp(42px,8vw,64px)",color:T.accent,letterSpacing:-2,...S.glow }}>{fmt(secsLeft)}</span>
                   <span style={{ fontSize:9,letterSpacing:4,...S.dimText }}>{phase==="work"?"FOCUS":"REST"}</span>
                 </div>
               </div>
@@ -678,7 +736,7 @@ export default function FocusFlow() {
 
       {/* ════════════ HIDDEN SEO CONTENT ════════════ */}
       <section aria-hidden="true" style={{ position:"absolute",left:"-9999px",top:"auto",width:1,height:1,overflow:"hidden" }}>
-        <h1>FocusFlow — Free Pomodoro Timer, Ambient Noise Generator, Monitor Dead Pixel Test 2025 2026</h1>
+        <h1>Pomodoros — Free Pomodoro Timer, Ambient Noise Generator, Monitor Dead Pixel Test 2025 2026</h1>
 
         <h2>Pomodoro Timer — Keywords</h2>
         <p>free pomodoro timer online pomodoro technique 25 minutes timer focus timer work timer countdown timer productivity timer pomodoro clock pomodoro app no signup no account pomodoro timer free pomodoro website custom pomodoro intervals 50 minute timer 90 minute deep work timer tomato timer pomodairo focusmate alternative forest app alternative study timer exam timer school timer university timer college study session pomodoro with breaks adjustable pomodoro flowtime technique time blocking timer 52 17 rule timer website pomodoro no ads pomodoro no sign up browser timer no download best pomodoro timer 2025 best pomodoro timer 2026 pomofocus alternative marinara timer alternative tomato timer alternative be focused alternative focus keeper alternative flow time technique timer</p>
@@ -704,9 +762,9 @@ export default function FocusFlow() {
         <h2>Productivity & Focus Tools — Keywords</h2>
         <p>productivity app focus app deep work tool time management app pomodoro technique timer study timer work timer break timer focus session timer productivity tracker time tracking app distraction blocker website blocker app focus music study music ambient sounds white noise brown noise pink noise nature sounds rain sounds ocean sounds forest sounds thunderstorm sounds fireplace sounds coffee shop sounds library sounds office background sounds study environment focus environment ADHD tools anxiety tools stress relief tools sleep tools meditation tools mindfulness tools breathing exercises relaxation techniques concentration aids cognitive enhancement memory improvement learning tools study techniques exam preparation academic tools professional tools business tools remote work tools work from home productivity home office setup digital minimalism simple living mindfulness productivity work-life balance time blocking time boxing task management project management workflow automation productivity hacks life hacks personal development self-improvement goal setting habit formation habit tracking daily routine morning routine evening routine productivity systems productivity methodology GTD getting things done Eisenhower matrix Pareto principle 80/20 rule time audit time analysis productivity metrics performance metrics KPI dashboard analytics reporting data visualization productivity dashboard focus dashboard time dashboard work dashboard personal dashboard</p>
 
-        <h2>FAQ: FocusFlow Enhanced</h2>
-        <h3>What is FocusFlow Enhanced?</h3>
-        <p>FocusFlow Enhanced is a comprehensive free productivity tool featuring: Pomodoro timer with custom intervals, white/pink/brown noise generator via Web Audio API, advanced monitor testing with 24+ color presets including RGB spectrum and professional display testing colors, distraction-free autosaving notepad, daily focus time tracker, and a Progressive Web App that works fully offline. Enhanced with expanded wash modes for comprehensive display calibration and professional-grade monitor testing capabilities.</p>
+        <h2>FAQ: Pomodoros Enhanced</h2>
+        <h3>What is Pomodoros Enhanced?</h3>
+        <p>Pomodoros Enhanced is a comprehensive free productivity tool featuring: Pomodoro timer with custom intervals, white/pink/brown noise generator via Web Audio API, advanced monitor testing with 24+ color presets including RGB spectrum and professional display testing colors, distraction-free autosaving notepad, daily focus time tracker, and a Progressive Web App that works fully offline. Enhanced with expanded wash modes for comprehensive display calibration and professional-grade monitor testing capabilities.</p>
 
         <h3>How do I test my monitor with enhanced wash modes?</h3>
         <p>Press C or click WASH. Choose from 24+ calibrated presets across three groups. Brightness group: Pure White, Warm White, Cool White, Pure Black, Near Black, 25% Gray, 75% Gray for brightness and contrast testing. Primary group: Pure Red, Green, Blue, Yellow, Cyan, Magenta for complete RGB spectrum testing and subpixel analysis. Advanced group: Navy, Amber, Orange, Purple, Teal, Lime, Pink, Brown, Olive, Maroon for professional display calibration, color accuracy testing, and panel defect detection. Each color is specifically chosen to reveal different types of display issues and calibration problems.</p>
@@ -720,8 +778,8 @@ export default function FocusFlow() {
         <h3>Why are there so many wash colors?</h3>
         <p>Different colors reveal different display issues. Primary colors (RGB) test subpixel functionality. Secondary colors (CMY) test color mixing. Grayscale tests uniformity and contrast. Warm/cool whites test color temperature. Dark colors test backlight bleeding. Bright colors test HDR capability. Professional colors test color accuracy and gamut coverage. This comprehensive approach ensures thorough display testing for professionals and enthusiasts.</p>
 
-        <h3>Is FocusFlow Enhanced really free and does it track me?</h3>
-        <p>FocusFlow Enhanced is 100% free with no subscription, no account, no advertisements, and zero analytics or tracking. All data — notes, settings, focus time, theme preferences — is stored locally on your device in localStorage and never leaves your browser. No data is sent to any servers.</p>
+        <h3>Is Pomodoros Enhanced really free and does it track me?</h3>
+        <p>Pomodoros Enhanced is 100% free with no subscription, no account, no advertisements, and zero analytics or tracking. All data — notes, settings, focus time, theme preferences — is stored locally on your device in localStorage and never leaves your browser. No data is sent to any servers.</p>
       </section>
 
       <style>{`
