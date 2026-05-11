@@ -51,39 +51,15 @@ function getSystemTheme() {
 }
 
 /* ─────────────────────────────────────────────
-   WASH MODES — 24+ calibrated presets for comprehensive testing
+   WASH MODES — Top 5 essential colors
 ───────────────────────────────────────────── */
 const WASH_MODES = [
-  // Brightness group
-  { label:"PURE WHITE",  bg:"#FFFFFF", text:"#000000", group:"BRIGHTNESS" },
-  { label:"WARM WHITE",  bg:"#FFF5E1", text:"#3a2a10", group:"BRIGHTNESS" },
-  { label:"COOL WHITE",  bg:"#F0F4FF", text:"#1a1e3a", group:"BRIGHTNESS" },
-  { label:"PURE BLACK",  bg:"#000000", text:"#333333", group:"BRIGHTNESS" },
-  { label:"NEAR BLACK",  bg:"#090909", text:"#444444", group:"BRIGHTNESS" },
-  { label:"25% GRAY",    bg:"#404040", text:"#cccccc", group:"BRIGHTNESS" },
-  { label:"75% GRAY",    bg:"#BFBFBF", text:"#333333", group:"BRIGHTNESS" },
-  // Primary group
-  { label:"PURE RED",    bg:"#FF0000", text:"#ffffff", group:"PRIMARY" },
-  { label:"PURE GREEN",  bg:"#00FF00", text:"#003300", group:"PRIMARY" },
-  { label:"PURE BLUE",   bg:"#0000FF", text:"#aaaaff", group:"PRIMARY" },
-  { label:"PURE YELLOW", bg:"#FFFF00", text:"#333333", group:"PRIMARY" },
-  { label:"PURE CYAN",   bg:"#00FFFF", text:"#003333", group:"PRIMARY" },
-  { label:"PURE MAGENTA",bg:"#FF00FF", text:"#ffffff", group:"PRIMARY" },
-  // Advanced group
-  { label:"50% GRAY",    bg:"#808080", text:"#ffffff", group:"ADVANCED" },
-  { label:"DEEP NAVY",   bg:"#001133", text:"#4466aa", group:"ADVANCED" },
-  { label:"AMBER",       bg:"#FF8C00", text:"#2a1800", group:"ADVANCED" },
-  { label:"MAGENTA",     bg:"#FF00FF", text:"#ffffff", group:"ADVANCED" },
-  { label:"ORANGE",      bg:"#FFA500", text:"#332200", group:"ADVANCED" },
-  { label:"PURPLE",      bg:"#800080", text:"#ffccff", group:"ADVANCED" },
-  { label:"TEAL",        bg:"#008080", text:"#ccffff", group:"ADVANCED" },
-  { label:"LIME",        bg:"#32CD32", text:"#001a00", group:"ADVANCED" },
-  { label:"PINK",        bg:"#FFC0CB", text:"#330011", group:"ADVANCED" },
-  { label:"BROWN",       bg:"#964B00", text:"#ffe4cc", group:"ADVANCED" },
-  { label:"OLIVE",       bg:"#808000", text:"#ffffcc", group:"ADVANCED" },
-  { label:"MAROON",      bg:"#800000", text:"#ffcccc", group:"ADVANCED" },
+  { label:"RED",    bg:"#FF0000", text:"#ffffff" },
+  { label:"GREEN",  bg:"#00FF00", text:"#003300" },
+  { label:"BLUE",   bg:"#0000FF", text:"#aaaaff" },
+  { label:"WHITE",  bg:"#FFFFFF", text:"#000000" },
+  { label:"BLACK",  bg:"#000000", text:"#333333" },
 ];
-const WASH_GROUPS = ["BRIGHTNESS","PRIMARY","ADVANCED"];
 
 /* ─────────────────────────────────────────────
    CONSTANTS
@@ -184,7 +160,6 @@ function ThemeToggle({ themeMode, setThemeMode, T }) {
     <div style={{ display:"flex",alignItems:"center",border:`1px solid ${T.border}`,borderRadius:3,overflow:"hidden",height:26 }}>
       {[
         {id:"dark",   icon:<Moon size={10}/> },
-        {id:"system", icon:<Laptop size={10}/> },
         {id:"light",  icon:<Sun size={10}/> },
       ].map((opt,i,arr)=>(
         <button key={opt.id} onClick={()=>setThemeMode(opt.id)} title={opt.id.toUpperCase()}
@@ -203,15 +178,8 @@ export default function FocusFlow() {
 
   /* ── THEME ── */
   const [themeMode, setThemeMode] = useState(()=>localStorage.getItem(LS_KEYS.themeMode)||"dark");
-  const resolvedTheme = themeMode==="system"?getSystemTheme():themeMode;
-  const T = THEMES[resolvedTheme]||THEMES.dark;
+  const T = THEMES[themeMode]||THEMES.dark;
   useEffect(()=>{localStorage.setItem(LS_KEYS.themeMode,themeMode);},[themeMode]);
-  useEffect(()=>{
-    if (themeMode!=="system") return;
-    const mq=window.matchMedia("(prefers-color-scheme: dark)");
-    const h=()=>setThemeMode(m=>m); mq.addEventListener("change",h);
-    return ()=>mq.removeEventListener("change",h);
-  },[themeMode]);
 
   /* ── TABS ── */
   const [tab, setTab] = useState("timer");
@@ -219,7 +187,7 @@ export default function FocusFlow() {
   /* ── COLOR WASH ── */
   const [washActive, setWashActive] = useState(false);
   const [washIdx, setWashIdx]       = useState(0);
-  const [washGroup, setWashGroup]   = useState("BRIGHTNESS");
+  const [showWashMessage, setShowWashMessage] = useState(false);
 
   /* ── POMODORO ── */
   const [workMin, setWorkMin]   = useState(()=>parseInt(localStorage.getItem(LS_KEYS.workMin)||"25",10));
@@ -284,11 +252,11 @@ export default function FocusFlow() {
 
   /* ── TAB TITLE ── */
   useEffect(()=>{
-    const h=()=>{document.title=document.hidden&&running?`⏱ Stay Focused: ${fmt(secsLeft)} — FocusFlow`:"FocusFlow — Deep Work Timer";};
+    const h=()=>{document.title=document.hidden&&running?`${fmt(secsLeft)}`:"FocusFlow — Deep Work Timer";};
     document.addEventListener("visibilitychange",h); return ()=>document.removeEventListener("visibilitychange",h);
   },[secsLeft,running]);
   useEffect(()=>{
-    document.title=document.hidden&&running?`⏱ Stay Focused: ${fmt(secsLeft)} — FocusFlow`:"FocusFlow — Deep Work Timer";
+    document.title=document.hidden&&running?`${fmt(secsLeft)}`:"FocusFlow — Deep Work Timer";
   },[secsLeft,running]);
 
   /* ── TIMER ── */
@@ -325,6 +293,15 @@ export default function FocusFlow() {
       setFocusMs(p=>{const n=p+e2;saveFocusMs(n);return n;}); focusStartRef.current=null;
     }
   },[running]);
+
+  /* ── WASH MESSAGE ── */
+  useEffect(()=>{
+    if (washActive) {
+      setShowWashMessage(true);
+      const timer = setTimeout(() => setShowWashMessage(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [washActive]);
 
   useEffect(()=>{localStorage.setItem(LS_KEYS.workMin,workMin);},[workMin]);
   useEffect(()=>{localStorage.setItem(LS_KEYS.breakMin,breakMin);},[breakMin]);
@@ -421,7 +398,7 @@ export default function FocusFlow() {
      FULL UI
   ═══════════════════════════════════════════ */
   return (
-    <div style={{ background:T.bg,minHeight:"100vh",color:T.text,...S.font,transition:"background 0.25s,color 0.25s" }}>
+    <div style={{ background:T.bg,width:"100vw",height:"100vh",color:T.text,...S.font,transition:"background 0.25s,color 0.25s",overflow:"hidden",position:"fixed",top:0,left:0 }}>
 
       {/* Scanlines */}
       <div style={{ position:"fixed",inset:0,zIndex:9998,...S.scanlines }}/>
@@ -446,42 +423,30 @@ export default function FocusFlow() {
 
       {/* ════ COLOR WASH OVERLAY ════ */}
       {washActive&&(
-        <div style={{ position:"fixed",inset:0,zIndex:9000,background:currentWash.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0,transition:"background 0.25s ease" }}>
-          <span style={{ color:currentWash.text,fontSize:15,letterSpacing:6,opacity:0.65,marginBottom:4,fontFamily:"'Share Tech Mono',monospace" }}>{currentWash.label}</span>
-          <span style={{ color:currentWash.text,fontSize:9,letterSpacing:3,opacity:0.3,marginBottom:22,fontFamily:"'Share Tech Mono',monospace" }}>CLICK A SWATCH · [ESC] CLOSE</span>
+        <div style={{ position:"fixed",top:0,left:0,width:"100vw",height:"100vh",zIndex:9999,background:currentWash.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0,transition:"background 0.25s ease" }}>
+          {/* Temporary ESC message */}
+          {showWashMessage && (
+            <div style={{ position:"absolute",top:20,left:"50%",transform:"translateX(-50%)",background:"rgba(0,0,0,0.8)",color:currentWash.text,padding:"8px 16px",borderRadius:4,fontSize:12,letterSpacing:1,fontFamily:"'Share Tech Mono',monospace",opacity:showWashMessage?1:0,transition:"opacity 0.5s ease" }}>
+              Press ESC to exit
+            </div>
+          )}
 
-          {/* Group tabs */}
-          <div style={{ display:"flex",gap:0,marginBottom:18,border:`1px solid ${currentWash.text}22`,borderRadius:3,overflow:"hidden" }}>
-            {WASH_GROUPS.map((g,i)=>(
-              <button key={g} onClick={()=>setWashGroup(g)}
-                style={{ background:washGroup===g?`${currentWash.text}15`:"transparent",border:"none",borderRight:i<2?`1px solid ${currentWash.text}22`:"none",color:currentWash.text,padding:"5px 16px",cursor:"pointer",fontFamily:"'Share Tech Mono',monospace",fontSize:8,letterSpacing:3,opacity:washGroup===g?0.75:0.35 }}>
-                {g}
-              </button>
-            ))}
-          </div>
+          <span style={{ color:currentWash.text,fontSize:15,letterSpacing:6,opacity:0.65,marginBottom:4,fontFamily:"'Share Tech Mono',monospace" }}>{currentWash.label}</span>
 
           {/* Swatches */}
-          <div style={{ display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center",maxWidth:"min(400px,90vw)",padding:"0 16px" }}>
-            {WASH_MODES.filter(w=>w.group===washGroup).map(w=>{
-              const gi=WASH_MODES.indexOf(w);
-              return (
-                <button key={w.label} onClick={()=>setWashIdx(gi)}
-                  style={{ width:"clamp(70px,15vw,82px)",height:"clamp(50px,10vw,62px)",background:w.bg,border:gi===washIdx?`3px solid ${w.text}`:`2px solid ${w.text}33`,borderRadius:5,cursor:"pointer",display:"flex",alignItems:"flex-end",justifyContent:"center",padding:"0 0 5px",boxShadow:gi===washIdx?`0 0 18px ${w.text}44`:undefined,transition:"all 0.15s",outline:"none" }}>
-                  <span style={{ fontSize:"clamp(6px,2vw,7px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
+          <div style={{ display:"flex",flexWrap:"wrap",gap:12,justifyContent:"center",maxWidth:"min(400px,80vw)",padding:"0 20px" }}>
+            {WASH_MODES.map((w,gi)=>(
+              <button key={w.label} onClick={()=>setWashIdx(gi)}
+                style={{ width:"clamp(80px,15vw,100px)",height:"clamp(60px,12vw,80px)",background:w.bg,border:gi===washIdx?`3px solid ${w.text}`:`2px solid ${w.text}33`,borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:"0 0 5px",boxShadow:gi===washIdx?`0 0 18px ${w.text}44`:undefined,transition:"all 0.15s",outline:"none" }}>
+                  <span style={{ fontSize:"clamp(8px,2vw,10px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
                 </button>
-              );
-            })}
+            ))}
           </div>
-
-          <button onClick={()=>setWashActive(false)}
-            style={{ marginTop:26,background:"transparent",border:`1px solid ${currentWash.text}44`,color:currentWash.text,padding:"6px 22px",borderRadius:2,cursor:"pointer",fontFamily:"'Share Tech Mono',monospace",fontSize:9,letterSpacing:3,opacity:0.5 }}>
-            CLOSE [ESC]
-          </button>
         </div>
       )}
 
       {/* App shell */}
-      <div style={{ width:"100%",maxWidth:"1200px",margin:"0 auto",padding:isOffline?"56px 20px 20px":"20px",minHeight:"100vh",display:"flex",flexDirection:"column" }}>
+      <div style={{ width:"100vw",height:"100vh",margin:0,padding:isOffline?"56px 20px 20px":"20px",display:"grid",gridTemplateColumns:"1fr",gridTemplateRows:"auto 1fr auto",overflow:"hidden" }}>
 
         {/* Header */}
         <header style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:28,flexWrap:"wrap",gap:"12px" }}>
@@ -672,30 +637,32 @@ export default function FocusFlow() {
         <div style={{ marginTop:24,paddingTop:16,...S.borderTop }}>
           <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
             <span style={{ fontSize:8,letterSpacing:3,...S.faintText,marginRight:4 }}>TOOLS</span>
-            {!isInstalled&&deferredPrompt&&(
+            {!isInstalled&&deferredPrompt?(
               <button onClick={installPWA} style={{ background:T.accentFaint,border:`1px solid ${T.accent}`,color:T.accent,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5,animation:"breathe 3s ease-in-out infinite" }}>
                 <Download size={10}/> INSTALL APP
               </button>
-            )}
-            <div style={{ position:"relative" }}>
-              <button onClick={()=>setShowBookmarkTip(v=>!v)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.textDim,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
-                <Bookmark size={10}/> BOOKMARK
+            ) : isInstalled ? (
+              <button style={{ background:T.accentFaint,border:`1px solid ${T.border}`,color:T.accent,padding:"5px 10px",borderRadius:2,cursor:"default",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
+                <Shield size={10}/> APP INSTALLED
               </button>
-              {showBookmarkTip&&(
-                <div style={{ position:"absolute",bottom:"calc(100% + 8px)",left:0,background:T.surface||T.bg,border:`1px solid ${T.border}`,borderRadius:3,padding:"10px 14px",whiteSpace:"nowrap",zIndex:100,boxShadow:`0 4px 20px rgba(0,0,0,0.25)` }}>
-                  <div style={{ fontSize:9,letterSpacing:2,color:T.accent,marginBottom:6 }}>KEEP THIS TOOL HANDY</div>
-                  <div style={{ fontSize:9,color:T.textDim,letterSpacing:1 }}>
-                    Press <span style={{ border:`1px solid ${T.border}`,padding:"1px 5px",borderRadius:2,color:T.accent }}>Ctrl+D</span> or <span style={{ border:`1px solid ${T.border}`,padding:"1px 5px",borderRadius:2,color:T.accent }}>⌘+D</span>
+            ) : (
+              <div style={{ position:"relative" }}>
+                <button onClick={()=>setShowBookmarkTip(v=>!v)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.textDim,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
+                  <Bookmark size={10}/> BOOKMARK
+                </button>
+                {showBookmarkTip&&(
+                  <div style={{ position:"absolute",bottom:"calc(100% + 8px)",left:0,background:T.surface||T.bg,border:`1px solid ${T.border}`,borderRadius:3,padding:"10px 14px",whiteSpace:"nowrap",zIndex:100,boxShadow:`0 4px 20px rgba(0,0,0,0.25)` }}>
+                    <div style={{ fontSize:9,letterSpacing:2,color:T.accent,marginBottom:6 }}>KEEP THIS TOOL HANDY</div>
+                    <div style={{ fontSize:9,color:T.textDim,letterSpacing:1 }}>
+                      Press <span style={{ border:`1px solid ${T.border}`,padding:"1px 5px",borderRadius:2,color:T.accent }}>Ctrl+D</span> or <span style={{ border:`1px solid ${T.border}`,padding:"1px 5px",borderRadius:2,color:T.accent }}>⌘+D</span>
+                    </div>
+                    <button onClick={()=>setShowBookmarkTip(false)} style={{ position:"absolute",top:4,right:6,background:"none",border:"none",color:T.textDim,cursor:"pointer",fontSize:10 }}>×</button>
                   </div>
-                  <button onClick={()=>setShowBookmarkTip(false)} style={{ position:"absolute",top:4,right:6,background:"none",border:"none",color:T.textDim,cursor:"pointer",fontSize:10 }}>×</button>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
             <button onClick={copyURL} style={{ background:copied?T.accentFaint:"none",border:`1px solid ${copied?T.accent:T.border}`,color:copied?T.accent:T.textDim,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5,transition:"all 0.2s" }}>
               {copied?<Check size={10}/>:<Copy size={10}/>}{copied?"COPIED!":"COPY URL"}
-            </button>
-            <button onClick={()=>setPinnedMode(true)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.textDim,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
-              <Minimize2 size={10}/> PINNED MODE
             </button>
           </div>
           <div style={{ display:"flex",flexWrap:"wrap",gap:10,marginTop:12 }}>
