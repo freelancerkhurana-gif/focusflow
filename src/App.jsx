@@ -232,6 +232,18 @@ export default function Pomodoros() {
   const T = THEMES[themeMode]||THEMES.dark;
   useEffect(()=>{localStorage.setItem(LS_KEYS.themeMode,themeMode);},[themeMode]);
 
+  /* ── DERIVED STYLES ── */
+  const S={
+    timerRing:p=>({background:`conic-gradient(${T.accent} ${p*360}deg,${T.accentFaint} 0deg)`}),
+    glow:{textShadow:T.glow},
+    btnGlow:{boxShadow:`0 0 12px ${T.accentDim}`,background:T.btnBg,color:T.btnText},
+    dimText:{color:T.textDim},
+    faintText:{color:T.textFaint},
+    borderTop:{borderTop:`1px solid ${T.border}`},
+    font:{fontFamily:"'Share Tech Mono','Courier New',monospace"},
+    scanlines:{backgroundImage:`repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,${T.scanOpacity}) 2px,rgba(0,0,0,${T.scanOpacity}) 4px)`,pointerEvents:"none"},
+  };
+
   /* ── TABS ── */
   const [tab, setTab] = useState("timer");
 
@@ -455,18 +467,6 @@ export default function Pomodoros() {
   const focusSecs2=Math.floor((focusMs%60000)/1000);
   const currentWash=WASH_MODES[washIdx];
 
-  /* ── DERIVED STYLES ── */
-  const S={
-    timerRing:p=>({background:`conic-gradient(${T.accent} ${p*360}deg,${T.accentFaint} 0deg)`}),
-    glow:{textShadow:T.glow},
-    btnGlow:{boxShadow:`0 0 12px ${T.accentDim}`,background:T.btnBg,color:T.btnText},
-    dimText:{color:T.textDim},
-    faintText:{color:T.textFaint},
-    borderTop:{borderTop:`1px solid ${T.border}`},
-    font:{fontFamily:"'Share Tech Mono','Courier New',monospace"},
-    scanlines:{backgroundImage:`repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,${T.scanOpacity}) 2px,rgba(0,0,0,${T.scanOpacity}) 4px)`,pointerEvents:"none"},
-  };
-
   /* ═══════════════════════════════════════════
      PINNED MODE
   ═══════════════════════════════════════════ */
@@ -508,17 +508,6 @@ export default function Pomodoros() {
         </div>
       )}
 
-/* ── DERIVED STYLES ── */
-const S={
-  timerRing:p=>({background:`conic-gradient(${T.accent} ${p*360}deg,${T.accentFaint} 0deg)`}),
-  glow:{textShadow:T.glow},
-  btnGlow:{boxShadow:`0 0 12px ${T.accentDim}`,background:T.btnBg,color:T.btnText},
-  dimText:{color:T.textDim},
-  faintText:{color:T.textFaint},
-  borderTop:{borderTop:`1px solid ${T.border}`},
-  font:{fontFamily:"'Share Tech Mono','Courier New',monospace"},
-  scanlines:{backgroundImage:`repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,${T.scanOpacity}) 2px,rgba(0,0,0,${T.scanOpacity}) 4px)`,pointerEvents:"none"},
-};
 
 /* ═══════════════════════════════════════════
    PINNED MODE
@@ -570,57 +559,6 @@ return (
             Press ESC to exit
           </div>
         )}
-        <button onClick={()=>{
-          if (pipWindow) {
-            pipWindow.close();
-            setPipWindow(null);
-          } else {
-            // Simple PiP implementation
-            const pipWindow = window.open('', 'width=300,height=150,left=100,top=100');
-            pipWindow.document.write(`
-              <!DOCTYPE html>
-              <html>
-                <head>
-                  <title>Pomodoros Timer</title>
-                  <style>
-                    * { margin: 0; padding: 0; box-sizing: border-box; }
-                    body { 
-                      background: ${T.bg}; 
-                      color: ${T.accent}; 
-                      font-family: 'Share Tech Mono', monospace;
-                      font-weight: bold;
-                      display: flex; 
-                      align-items: center; 
-                      justify-content: center; 
-                      height: 100vh; 
-                      overflow: hidden;
-                      border: 2px solid ${T.accent};
-                      border-radius: 8px;
-                    }
-                    .timer {
-                      font-size: 24px;
-                      letter-spacing: 2px;
-                    }
-                  </style>
-                </head>
-                <body>
-                  <div class="timer">${fmt(secsLeft)}</div>
-                  <script>
-                    setInterval(() => {
-                      const timer = document.querySelector('.timer');
-                      if (timer) {
-                        timer.textContent = fmt(secsLeft);
-                      }
-                    }, 1000);
-                  </script>
-                </body>
-              </html>
-            `);
-            setPipWindow(pipWindow);
-          }
-        }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,padding:"5px 8px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
-          <Pin size={11}/> {pipWindow ? 'UNPIN' : 'PIN'}
-        </button>
         <span style={{ color:currentWash.text,fontSize:15,letterSpacing:6,opacity:0.65,marginBottom:4,fontFamily:"'Share Tech Mono',monospace" }}>{currentWash.label}</span>
 
         {/* Swatches */}
@@ -719,12 +657,6 @@ return (
                 <span style={{ fontSize:"clamp(8px,2vw,10px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
               </button>
           ))}
-                });
-              }}
-                style={{ width:"clamp(80px,15vw,100px)",height:"clamp(60px,12vw,80px)",background:w.bg,border:gi===washIdx?`3px solid ${w.text}`:`2px solid ${w.text}33`,borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:"0 0 5px",boxShadow:gi===washIdx?`0 0 18px ${w.text}44`:undefined,transition:"all 0.15s",outline:"none" }}>
-                  <span style={{ fontSize:"clamp(8px,2vw,10px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
-                </button>
-            ))}
           </div>
         </div>
       )}
@@ -746,13 +678,125 @@ return (
           <div style={{ display:"flex",gap:6,alignItems:"center" }}>
             {/* Theme toggle — top right */}
             <ThemeToggle themeMode={themeMode} setThemeMode={setThemeMode} T={T}/>
+            <button onClick={()=>{
+              if (pipWindow) {
+                pipWindow.close();
+                setPipWindow(null);
+              } else {
+                // Enhanced PiP implementation with proper timer sync
+                const pipWindow = window.open('', 'width=300,height=150,left=100,top=100');
+                pipWindow.document.write(`
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <title>Pomodoros Timer</title>
+                      <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                        body { 
+                          background: ${T.bg}; 
+                          color: ${T.accent}; 
+                          font-family: 'Share Tech Mono', monospace;
+                          font-weight: bold;
+                          display: flex; 
+                          align-items: center; 
+                          justify-content: center; 
+                          height: 100vh; 
+                          overflow: hidden;
+                          border: 2px solid ${T.accent};
+                          border-radius: 8px;
+                        }
+                        .timer {
+                          font-size: 24px;
+                          letter-spacing: 2px;
+                        }
+                        .phase {
+                          font-size: 10px;
+                          letter-spacing: 3px;
+                          opacity: 0.6;
+                          margin-top: 4px;
+                        }
+                      </style>
+                    </head>
+                    <body>
+                      <div>
+                        <div class="timer" id="timer">${Math.floor(secsLeft/60)}:${(secsLeft%60).toString().padStart(2,'0')}</div>
+                        <div class="phase" id="phase">${phase==="work"?"FOCUS":"REST"}</div>
+                      </div>
+                      <script>
+                        let secsLeft = ${secsLeft};
+                        let phase = "${phase}";
+                        let running = ${running};
+                        
+                        function formatTime(seconds) {
+                          const mins = Math.floor(seconds / 60);
+                          const secs = seconds % 60;
+                          return \`\${mins}:\${secs.toString().padStart(2, '0')}\`;
+                        }
+                        
+                        function updateDisplay() {
+                          const timerEl = document.getElementById('timer');
+                          const phaseEl = document.getElementById('phase');
+                          if (timerEl) timerEl.textContent = formatTime(secsLeft);
+                          if (phaseEl) phaseEl.textContent = phase === "work" ? "FOCUS" : "REST";
+                        }
+                        
+                        // Listen for updates from parent window
+                        window.addEventListener('message', (event) => {
+                          if (event.data.type === 'timer-update') {
+                            secsLeft = event.data.secsLeft;
+                            phase = event.data.phase;
+                            running = event.data.running;
+                            updateDisplay();
+                          }
+                        });
+                        
+                        // Initial display
+                        updateDisplay();
+                        
+                        // Countdown if running
+                        if (running) {
+                          setInterval(() => {
+                            if (secsLeft > 0 && running) {
+                              secsLeft--;
+                              updateDisplay();
+                            }
+                          }, 1000);
+                        }
+                        
+                        // Close on escape
+                        document.addEventListener('keydown', (e) => {
+                          if (e.key === 'Escape') {
+                            window.close();
+                          }
+                        });
+                      </script>
+                    </body>
+                  </html>
+                `);
+                setPipWindow(pipWindow);
+                
+                // Set up message passing to sync timer
+                const timerSyncInterval = setInterval(() => {
+                  if (pipWindow && !pipWindow.closed) {
+                    pipWindow.postMessage({
+                      type: 'timer-update',
+                      secsLeft: secsLeft,
+                      phase: phase,
+                      running: running
+                    }, '*');
+                  } else {
+                    clearInterval(timerSyncInterval);
+                    setPipWindow(null);
+                  }
+                }, 1000);
+              }
+            }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,padding:"5px 8px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
+              <Pin size={11}/> {pipWindow ? 'UNPIN' : 'PIN'}
             </button>
             <button onClick={()=>setWashActive(true)} title="Color Wash [C]"
               style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,padding:"5px 8px",borderRadius:2,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontSize:9,letterSpacing:2 }}>
               <Monitor size={11}/> WASH
             </button>
-        </div>
-      </header>
           </div>
         </header>
 
@@ -919,12 +963,7 @@ return (
               <button onClick={installPWA} style={{ background:T.accentFaint,border:`1px solid ${T.accent}`,color:T.accent,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5,animation:"breathe 3s ease-in-out infinite" }}>
                 <Download size={10}/> INSTALL APP
               </button>
-            ) : isInstalled ? (
-                    <button onClick={()=>setShowBookmarkTip(false)} style={{ position:"absolute",top:4,right:6,background:"none",border:"none",color:T.textDim,cursor:"pointer",fontSize:10 }}>×</button>
-                  </div>
-                )}
-              </div>
-            )}
+            ) : null}
             <button onClick={copyURL} style={{ background:copied?T.accentFaint:"none",border:`1px solid ${copied?T.accent:T.border}`,color:copied?T.accent:T.textDim,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5,transition:"all 0.2s" }}>
               {copied?<Check size={10}/>:<Copy size={10}/>}{copied?"COPIED!":"COPY URL"}
             </button>
@@ -999,6 +1038,7 @@ return (
         ::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-track{background:transparent;} ::-webkit-scrollbar-thumb{background:rgba(128,128,128,0.2);border-radius:2px;}
         *{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}
       `}</style>
+    </div>
     </div>
   );
 }
