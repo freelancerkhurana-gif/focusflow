@@ -1,488 +1,794 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Play, Pause, RotateCcw, Settings, X, Volume2, VolumeX,
-  Monitor, FileText, BarChart2, ChevronUp, ChevronDown, Zap,
-  Download, Bookmark, Copy, Check, Minimize2, Maximize2,
-  Pin, Shield, WifiOff, Sun, Moon, Laptop
-} from "lucide-react";
+import { Monitor, Sun, Moon, Volume2, VolumeX, FileText, BarChart2 } from "lucide-react";
 
-/* ─────────────────────────────────────────────
-   THEME SYSTEM
-───────────────────────────────────────────── */
-const THEME = {
-  bg: "#1a1d23",
-  surface: "#22262e", 
-  border: "rgba(200,200,200,0.08)",
-  accent: "#e8e8e8",
-  text: "#e8e8e8",
-  textDim: "rgba(232,232,232,0.5)"
-};
-
-function getSystemTheme() {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-/* ─────────────────────────────────────────────
-   WASH MODES — Top 5 essential colors
-───────────────────────────────────────────── */
-const WASH_MODES = [
-  { label:"RED",    bg:"#FF0000", text:"#ffffff" },
-  { label:"GREEN",  bg:"#00FF00", text:"#003300" },
-  { label:"BLUE",   bg:"#0000FF", text:"#aaaaff" },
-  { label:"WHITE",  bg:"#FFFFFF", text:"#000000" },
-  { label:"BLACK",  bg:"#000000", text:"#333333" },
-];
-
-/* ─────────────────────────────────────────────
-   CONSTANTS
-───────────────────────────────────────────── */
-const NOISE_TYPES = ["white","pink","brown"];
-const LS_KEYS = {
-  note:      "ff_note",
-  focusMs:   "ff_focus_ms",
-  focusDate: "ff_focus_date",
-  workMin:   "ff_work_min",
-  breakMin:  "ff_break_min",
-  installed: "ff_pwa_installed",
-  themeMode: "ff_theme_mode",
-  muted:     "ff_muted",
-};
-const APP_URL = window.location.href;
-
-/* ─────────────────────────────────────────────
-   NOISE GENERATOR
-───────────────────────────────────────────── */
-function createNoiseNode(ctx, type) {
-  const bufferSize = ctx.sampleRate * 4;
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  if (type === "white") {
-    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-  } else if (type === "brown") {
-    let last = 0;
-    for (let i = 0; i < bufferSize; i++) {
-      const w = Math.random() * 2 - 1;
-      data[i] = (last + 0.02 * w) / 1.02; last = data[i]; data[i] *= 3.5;
-    }
-  } else {
-    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-    for (let i = 0; i < bufferSize; i++) {
-      const w = Math.random() * 2 - 1;
-      b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
-      b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
-      b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
-      data[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926;
-    }
-  }
-  const src = ctx.createBufferSource(); src.buffer = buffer; src.loop = true; return src;
-}
-
-/* ─────────────────────────────────────────────
-   HELPERS
-───────────────────────────────────────────── */
-function pad(n) { return String(n).padStart(2,"0"); }
-function fmt(sec) { return `${pad(Math.floor(sec/60))}:${pad(sec%60)}`; }
-function todayStr() { return new Date().toISOString().slice(0,10); }
-function loadFocusMs() {
-  if (localStorage.getItem(LS_KEYS.focusDate) !== todayStr()) {
-    localStorage.setItem(LS_KEYS.focusDate, todayStr());
-    localStorage.setItem(LS_KEYS.focusMs, "0");
-  }
-  return parseInt(localStorage.getItem(LS_KEYS.focusMs)||"0",10);
-}
-function saveFocusMs(ms) { localStorage.setItem(LS_KEYS.focusMs, String(ms)); }
-
-/* ─────────────────────────────────────────────
-   FAVICON
-───────────────────────────────────────────── */
-function updateFavicon(secsLeft, phase, running) {
-  try {
-    const canvas = document.createElement("canvas"); canvas.width=32; canvas.height=32;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle="#090909"; ctx.beginPath(); ctx.arc(16,16,15,0,Math.PI*2); ctx.fill();
-    const totalSecs = phase==="work"?25*60:5*60;
-    const pct = 1-secsLeft/totalSecs;
-    ctx.strokeStyle=running?"#00FF41":"rgba(0,255,65,0.4)"; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.arc(16,16,12,-Math.PI/2,-Math.PI/2+pct*Math.PI*2); ctx.stroke();
-    const mins=Math.floor(secsLeft/60);
-    ctx.fillStyle=running?"#00FF41":"rgba(0,255,65,0.6)";
-    ctx.font=`bold ${mins>=10?11:9}px monospace`; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(mins>=10?String(mins):fmt(secsLeft),16,16);
-    ctx.fillStyle=phase==="break"?"#FFD700":"#00FF41";
-    ctx.beginPath(); ctx.arc(26,6,3,0,Math.PI*2); ctx.fill();
-    let link=document.querySelector("link[rel*='icon']");
-    if (!link){link=document.createElement("link");link.rel="icon";document.head.appendChild(link);}
-    link.href=canvas.toDataURL("image/png");
-  } catch(e){}
-}
-
-/* ─────────────────────────────────────────────
-   SERVICE WORKER
-───────────────────────────────────────────── */
-function registerSW() {
-  if (!("serviceWorker" in navigator)) return;
-  const code=`const C='ff-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).catch(()=>new Response('<h1>Offline</h1>',{headers:{'Content-Type':'text/html'}}))));});`;
-  try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([code],{type:"application/javascript"}))).catch(()=>{}); } catch(e){}
-}
-
-
-/* ═══════════════════════════════════════════
-   MAIN COMPONENT
-═══════════════════════════════════════════ */
 export default function Pomodoros() {
-
-  /* ── THEME ── */
-  const T = THEME;
-
-  /* ── SOUND ── */
-  const [isMuted, setIsMuted] = useState(()=>localStorage.getItem(LS_KEYS.muted)==="true");
-  useEffect(()=>{localStorage.setItem(LS_KEYS.muted,isMuted);},[isMuted]);
-
-  /* ── NOTIFICATIONS ── */
-  const [showOverlay, setShowOverlay] = useState(false);
-
-  /* ── ZEN CHIME ── */
-  const playZenChime = useCallback(() => {
-    if (isMuted) return;
-    
-    try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      // Create a gentle, smooth chime sound
-      oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5 note
-      oscillator.type = 'sine';
-      
-      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.01);
-      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.5);
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.5);
-      
-      // Clean up after sound finishes
-      setTimeout(() => {
-        audioContext.close();
-      }, 600);
-    } catch (error) {
-      console.log('Zen chime error:', error);
-    }
-  }, [isMuted]);
-
-  /* ── NOTIFICATION HANDLER ── */
-  const handleSessionComplete = useCallback(() => {
-    // Play Zen chime
-    playZenChime();
-    
-    // Show overlay if tab is active
-    if (!document.hidden) {
-      setShowOverlay(true);
-    }
-    
-    // Send desktop notification if tab is in background
-    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification('Focus Session Complete', {
-        body: 'Time for a break!',
-        icon: '/favicon.ico',
-        tag: 'pomodoros-session-complete'
-      });
-    }
-    
-    // Request notification permission if not granted
-    if ('Notification' in window && Notification.permission !== 'granted') {
-      Notification.requestPermission().then(permission => {
-        if (permission === 'granted') {
-          console.log('Notification permission granted');
-        }
-      });
-    }
-  }, [playZenChime]);
-
-  
-  /* ── TABS ── */
+  // State
   const [tab, setTab] = useState("timer");
-
-  /* ── COLOR WASH ── */
-  const [washActive, setWashActive] = useState(false);
-  const [washIdx, setWashIdx]       = useState(0);
-  const [showWashMessage, setShowWashMessage] = useState(false);
-
-  /* ── POMODORO ── */
-  const [workMin, setWorkMin]   = useState(()=>parseInt(localStorage.getItem(LS_KEYS.workMin)||"25",10));
-  const [breakMin, setBreakMin] = useState(()=>parseInt(localStorage.getItem(LS_KEYS.breakMin)||"5",10));
-  const [phase, setPhase]       = useState("work");
-  const [secsLeft, setSecsLeft] = useState(()=>parseInt(localStorage.getItem(LS_KEYS.workMin)||"25",10)*60);
-  const [running, setRunning]   = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [sessions, setSessions] = useState(0);
-  const timerRef = useRef(null);
-  const phaseRef = useRef("work"); phaseRef.current = phase;
-
-  /* ── FOCUS ── */
-  const [focusMs, setFocusMs] = useState(loadFocusMs);
-  const focusStartRef = useRef(null);
-
-  /* ── AUDIO ── */
+  const [workMin, setWorkMin] = useState(25);
+  const [breakMin, setBreakMin] = useState(5);
+  const [phase, setPhase] = useState("work");
+  const [secsLeft, setSecsLeft] = useState(25 * 60);
+  const [running, setRunning] = useState(false);
   const [noiseType, setNoiseType] = useState("brown");
-  const [noiseOn,   setNoiseOn]   = useState(false);
-  const [volume,    setVolume]    = useState(0.4);
-  const audioCtxRef=useRef(null); const gainRef=useRef(null); const noiseNodeRef=useRef(null);
+  const [noiseOn, setNoiseOn] = useState(false);
+  const [note, setNote] = useState("");
+  const [volume, setVolume] = useState(0.4);
+  const [isMuted, setIsMuted] = useState(false);
+  const [themeMode, setThemeMode] = useState("dark");
+  
+  // Refs
+  const timerRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const gainRef = useRef(null);
+  const noiseNodeRef = useRef(null);
+  const phaseRef = useRef("work");
+  phaseRef.current = phase;
 
-  /* ── NOTE ── */
-  const [note, setNote] = useState(()=>localStorage.getItem(LS_KEYS.note)||"");
+  // Constants
+  const WASH_MODES = [
+    { label: "RED", bg: "#FF0000", text: "#ffffff" },
+    { label: "GREEN", bg: "#00FF00", text: "#003300" },
+    { label: "BLUE", bg: "#0000FF", text: "#aaaaff" },
+    { label: "WHITE", bg: "#FFFFFF", text: "#000000" },
+    { label: "BLACK", bg: "#000000", text: "#333333" },
+  ];
 
-  /* ── PINNED ── */
-  const [pinnedMode, setPinnedMode] = useState(false);
-  const [pipWindow, setPipWindow] = useState(null);
+  const NOISE_TYPES = ["white", "pink", "brown"];
 
-  /* ── PWA ── */
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [isInstalled, setIsInstalled] = useState(()=>localStorage.getItem(LS_KEYS.installed)==="true"||window.matchMedia("(display-mode: standalone)").matches);
-  const [showProBadge, setShowProBadge] = useState(false);
+  // Theme colors
+  const bg = themeMode === "dark" ? "#121212" : "#f4f4ef";
+  const text = themeMode === "dark" ? "#e8e8e8" : "#1a1d23";
+  const textDim = themeMode === "dark" ? "rgba(232,232,232,0.5)" : "rgba(26,29,35,0.5)";
+  const accent = themeMode === "dark" ? "#e8e8e8" : "#1a1d23";
+  const surface = themeMode === "dark" ? "#1e1e1e" : "#ffffff";
 
-  /* ── UI state ── */
-  const [copied, setCopied]               = useState(false);
-  const [showBookmarkTip, setShowBookmarkTip] = useState(false);
-  const [isOffline, setIsOffline]         = useState(!navigator.onLine);
-  const faviconRef = useRef(null);
+  // Timer logic
+  const resetTimer = useCallback((newPhase = phase, newWorkMin = workMin, newBreakMin = breakMin) => {
+    clearInterval(timerRef.current);
+    setRunning(false);
+    setSecsLeft(newPhase === "work" ? newWorkMin * 60 : newBreakMin * 60);
+    setPhase(newPhase);
+  }, [phase, workMin, breakMin]);
 
-  /* ── INIT ── */
-  useEffect(()=>{
-    registerSW();
-    const on=()=>setIsOffline(false); const off=()=>setIsOffline(true);
-    window.addEventListener("online",on); window.addEventListener("offline",off);
-    return ()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};
-  },[]);
+  useEffect(() => {
+    if (!running) {
+      clearInterval(timerRef.current);
+      return;
+    }
 
-  useEffect(()=>{
-    const h=e=>{e.preventDefault();setDeferredPrompt(e);};
-    window.addEventListener("beforeinstallprompt",h);
-    window.addEventListener("appinstalled",()=>{setIsInstalled(true);setShowProBadge(true);localStorage.setItem(LS_KEYS.installed,"true");setTimeout(()=>setShowProBadge(false),6000);});
-    return ()=>window.removeEventListener("beforeinstallprompt",h);
-  },[]);
-
-  /* ── FAVICON ── */
-  useEffect(()=>{
-    updateFavicon(secsLeft,phase,running);
-    clearInterval(faviconRef.current);
-    faviconRef.current=setInterval(()=>updateFavicon(secsLeft,phase,running),10000);
-    return ()=>clearInterval(faviconRef.current);
-  },[secsLeft,phase,running]);
-
-  /* ── TAB TITLE ── */
-  useEffect(()=>{
-    const h=()=>{document.title=document.hidden&&running?`${fmt(secsLeft)}`:"Pomodoros — Deep Work Timer";};
-    document.addEventListener("visibilitychange",h); return ()=>document.removeEventListener("visibilitychange",h);
-  },[secsLeft,running]);
-  useEffect(()=>{
-    document.title=document.hidden&&running?`${fmt(secsLeft)}`:"Pomodoros — Deep Work Timer";
-  },[secsLeft,running]);
-
-  /* ── TIMER ── */
-  const totalSecs = phase==="work"?workMin*60:breakMin*60;
-  const pct = 1-secsLeft/totalSecs;
-  const resetTimer = useCallback((np=phase,wm=workMin,bm=breakMin)=>{
-    clearInterval(timerRef.current); setRunning(false); setSecsLeft(np==="work"?wm*60:bm*60);
-  },[phase,workMin,breakMin]);
-
-  useEffect(()=>{
-    if (!running){clearInterval(timerRef.current);return;}
-    if (phase==="work") focusStartRef.current=Date.now();
-    timerRef.current=setInterval(()=>{
-      if (!running) return;
-      if (secsLeft > 0) {
-        handleSessionComplete();
-        const nx = phaseRef.current === "work"?"break":"work"; 
-        setPhase(nx); 
+    timerRef.current = setInterval(() => {
+      if (secsLeft <= 1) {
+        // Session complete
+        const nextPhase = phaseRef.current === "work" ? "break" : "work";
+        setPhase(nextPhase);
         setRunning(false);
-        return nx==="work"?workMin*60:breakMin*60;
+        setSecsLeft(nextPhase === "work" ? workMin * 60 : breakMin * 60);
+        return;
       }
-      setSecsLeft(s=>s-1);
-    },1000);
-    return ()=>clearInterval(timerRef.current);
-  },[running, handleSessionComplete]);
+      setSecsLeft(s => s - 1);
+    }, 1000);
 
-  useEffect(()=>{
-    if (!running&&phase==="work"&&focusStartRef.current){
-      const e2=Date.now()-focusStartRef.current;
-      setFocusMs(p=>{const n=p+e2;saveFocusMs(n);return n;}); focusStartRef.current=null;
-    }
-  },[running]);
+    return () => clearInterval(timerRef.current);
+  }, [running, secsLeft, workMin, breakMin]);
 
-  /* ── WASH MESSAGE ── */
-  useEffect(()=>{
-    if (washActive) {
-      setShowWashMessage(true);
-      const timer = setTimeout(() => setShowWashMessage(false), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [washActive]);
-
-  useEffect(()=>{localStorage.setItem(LS_KEYS.workMin,workMin);},[workMin]);
-  useEffect(()=>{localStorage.setItem(LS_KEYS.breakMin,breakMin);},[breakMin]);
-
-  /* ── AUDIO ── */
-  const stopNoise=useCallback(()=>{if(noiseNodeRef.current){try{noiseNodeRef.current.stop();}catch(_){}noiseNodeRef.current=null;}},[]);
-  const startNoise=useCallback((type,vol)=>{
-    stopNoise();
-    if (!audioCtxRef.current||audioCtxRef.current.state==="closed") audioCtxRef.current=new(window.AudioContext||window.webkitAudioContext)();
-    const ctx=audioCtxRef.current; if(ctx.state==="suspended")ctx.resume();
-    if (!gainRef.current||gainRef.current.context!==ctx){gainRef.current=ctx.createGain();gainRef.current.connect(ctx.destination);}
-    gainRef.current.gain.setValueAtTime(vol,ctx.currentTime);
-    const node=createNoiseNode(ctx,type); node.connect(gainRef.current); node.start(); noiseNodeRef.current=node;
-  },[stopNoise]);
-  useEffect(()=>{if(gainRef.current)gainRef.current.gain.setValueAtTime(volume,audioCtxRef.current.currentTime);},[volume]);
-  useEffect(()=>{if(noiseOn)startNoise(noiseType,volume);else stopNoise();},[noiseOn,noiseType]);
-
-  /* ── NOTE AUTOSAVE ── */
-  useEffect(()=>{const t=setTimeout(()=>localStorage.setItem(LS_KEYS.note,note),400);return ()=>clearTimeout(t);},[note]);
-
-  /* ── KEYBOARD ── */
-  useEffect(()=>{
-    function onKey(e){
-      if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA")return;
-      switch(e.key.toLowerCase()){
-        case " ":e.preventDefault();setRunning(r=>!r);break;
-        case "r":resetTimer();break;
-        case "c":setWashActive(a=>{
-          if(!a)return true;
-          setWashIdx(i=>{const n=(i+1)%WASH_MODES.length;if(n===0){setWashActive(false);return 0;}return i;});
-          return true;
-        });break;
-        case "m":setNoiseOn(n=>!n);break;
-        case "p":setPinnedMode(v=>!v);break;
-        case "1":setTab("timer");break;
-        case "2":setTab("noise");break;
-        case "3":setTab("note");break;
-        case "4":setTab("stats");break;
-        case "escape":setWashActive(false);setShowSettings(false);setShowBookmarkTip(false);break;
+  // Audio functions
+  const createNoiseNode = useCallback((ctx, type) => {
+    const bufferSize = ctx.sampleRate * 4;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    
+    if (type === "white") {
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+    } else if (type === "brown") {
+      let last = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const w = Math.random() * 2 - 1;
+        data[i] = (last + 0.02 * w) / 1.02;
+        last = data[i];
+        data[i] *= 3.5;
+      }
+    } else {
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + w * 0.0555179;
+        b1 = 0.99332 * b1 + w * 0.0750759;
+        b2 = 0.96900 * b2 + w * 0.1538520;
+        b3 = 0.86650 * b3 + w * 0.3104856;
+        b4 = 0.55000 * b4 + w * 0.5329522;
+        b5 = -0.7616 * b5 - w * 0.0168980;
+        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+        b6 = w * 0.115926;
       }
     }
-    window.addEventListener("keydown",onKey);return ()=>window.removeEventListener("keydown",onKey);
-  },[resetTimer]);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    return src;
+  }, []);
 
-  /* ── WAKE LOCK ── */
-  useEffect(()=>{
-    if (!('wakeLock' in navigator)) return;
-    
-    let wakeLock = null;
-    
-    const requestWakeLock = async () => {
+  const stopNoise = useCallback(() => {
+    if (noiseNodeRef.current) {
       try {
-        if (running && !wakeLock) {
-          wakeLock = await navigator.wakeLock.request('screen', {
-            preventSleep: true
-          });
-          
-          wakeLock.addEventListener('release', () => {
-            wakeLock = null;
-            // Lock released, try to reacquire if still running
-            if (running && !document.hidden) {
-              setTimeout(requestWakeLock, 1000);
-            }
-          });
-          
-          console.log('Wake Lock acquired');
-        }
-      } catch (err) {
-        console.log('Wake Lock error:', err);
-        wakeLock = null;
-      }
-    };
-    
-    const releaseWakeLock = () => {
-      if (wakeLock) {
-        wakeLock.release();
-        wakeLock = null;
-      }
-    };
-    
-    const handleVisibilityChange = async () => {
-      if (document.hidden && running) {
-        // Request wake lock when tab becomes hidden
-        await requestWakeLock();
-      } else if (!document.hidden && !running) {
-        // Release wake lock when tab becomes visible and timer is not running
-        releaseWakeLock();
-      }
-    };
-    
-    // Initial wake lock request if timer is running
-    if (running) {
-      requestWakeLock();
+        noiseNodeRef.current.stop();
+      } catch (_) {}
+      noiseNodeRef.current = null;
     }
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      releaseWakeLock();
-    };
-  },[running]);
+  }, []);
 
-  /* ── COPY URL ── */
-  const copyURL=async()=>{
-    try{await navigator.clipboard.writeText(APP_URL);}
-    catch{const el=document.createElement("textarea");el.value=APP_URL;document.body.appendChild(el);el.select();document.execCommand("copy");document.body.removeChild(el);}
-    setCopied(true);setTimeout(()=>setCopied(false),2500);
+  const startNoise = useCallback((type, vol) => {
+    stopNoise();
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = audioCtxRef.current;
+    if (ctx.state === "suspended") ctx.resume();
+    
+    if (!gainRef.current || gainRef.current.context !== ctx) {
+      gainRef.current = ctx.createGain();
+      gainRef.current.connect(ctx.destination);
+    }
+    gainRef.current.gain.setValueAtTime(vol, ctx.currentTime);
+    
+    const node = createNoiseNode(ctx, type);
+    node.connect(gainRef.current);
+    node.start();
+    noiseNodeRef.current = node;
+  }, [stopNoise, createNoiseNode]);
+
+  useEffect(() => {
+    if (noiseOn) {
+      startNoise(noiseType, volume);
+    } else {
+      stopNoise();
+    }
+  }, [noiseOn, noiseType, volume, startNoise, stopNoise]);
+
+  // Wash mode function
+  const openWashMode = useCallback(() => {
+    const newWindow = window.open('', '_blank');
+    const color = WASH_MODES[0];
+    
+    newWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${color.label} - Pomodoros</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+              background: ${color.bg}; 
+              height: 100vh; 
+              overflow: hidden;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+            .info {
+              position: fixed;
+              top: 20px;
+              left: 50%;
+              transform: translateX(-50%);
+              color: ${color.text};
+              font-size: 14px;
+              letter-spacing: 2px;
+              opacity: 0.7;
+              z-index: 1000;
+            }
+            .colors {
+              position: fixed;
+              bottom: 40px;
+              left: 50%;
+              transform: translateX(-50%);
+              display: flex;
+              gap: 12px;
+              z-index: 1000;
+            }
+            .color-btn {
+              background: rgba(255, 255, 255, 0.1);
+              border: 1px solid ${color.text};
+              color: ${color.text};
+              padding: 8px 16px;
+              border-radius: 8px;
+              cursor: pointer;
+              font-size: 12px;
+              letter-spacing: 1px;
+              transition: all 0.2s ease;
+            }
+            .color-btn:hover {
+              background: rgba(255, 255, 255, 0.2);
+              transform: translateY(-1px);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="info">${color.label} - Press ESC to exit</div>
+          <div class="colors">
+            ${WASH_MODES.map((mode, index) => 
+              `<button class="color-btn" onclick="changeColor(${index})">${mode.label}</button>`
+            ).join('')}
+          </div>
+          <script>
+            const WASH_MODES = ${JSON.stringify(WASH_MODES)};
+            let currentColorIndex = 0;
+            
+            function changeColor(index) {
+              currentColorIndex = index;
+              const color = WASH_MODES[index];
+              document.body.style.background = color.bg;
+              document.querySelector('.info').textContent = color.label + ' - Press ESC to exit';
+              document.querySelectorAll('.color-btn').forEach((btn, i) => {
+                btn.style.opacity = i === index ? '1' : '0.7';
+              });
+            }
+            
+            // Request fullscreen on load
+            document.addEventListener('DOMContentLoaded', () => {
+              document.documentElement.requestFullscreen().catch(err => {
+                console.log('Fullscreen request failed:', err);
+              });
+            });
+            
+            // ESC to exit fullscreen and close
+            document.addEventListener('keydown', (e) => {
+              if (e.key === 'Escape') {
+                if (document.fullscreenElement) {
+                  document.exitFullscreen().then(() => {
+                    window.close();
+                  }).catch(() => {
+                    window.close();
+                  });
+                } else {
+                  window.close();
+                }
+              }
+            });
+            
+            // Initialize first button as active
+            changeColor(0);
+          </script>
+        </body>
+      </html>
+    `);
+    newWindow.document.close();
+  }, []);
+
+  // Format time
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  /* ── INSTALL PWA ── */
-  const installPWA=async()=>{
-    if(!deferredPrompt)return;
-    deferredPrompt.prompt();
-    const{outcome}=await deferredPrompt.userChoice;
-    if(outcome==="accepted"){setIsInstalled(true);setShowProBadge(true);localStorage.setItem(LS_KEYS.installed,"true");setTimeout(()=>setShowProBadge(false),6000);}
-    setDeferredPrompt(null);
-  };
+  return (
+    <div style={{
+      background: bg,
+      width: "100vw",
+      height: "100vh",
+      color: text,
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+      position: "fixed",
+      top: 0,
+      left: 0,
+      overflow: "hidden"
+    }}>
+      {/* Header */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "20px 30px",
+        zIndex: 10
+      }}>
+        {/* Logo */}
+        <div style={{
+          color: accent,
+          fontSize: "16px",
+          fontWeight: "500",
+          letterSpacing: "0.5px",
+          opacity: 0.8
+        }}>
+          Pomodoros.io
+        </div>
 
-  /* ── DISPLAY ── */
-  const focusHrs=Math.floor(focusMs/3600000);
-  const focusMins=Math.floor((focusMs%3600000)/60000);
-  const focusSecs2=Math.floor((focusMs%60000)/1000);
-  const currentWash=WASH_MODES[washIdx];
+        {/* Utility Row */}
+        <div style={{
+          display: "flex",
+          gap: "12px",
+          alignItems: "center"
+        }}>
+          {/* Theme Toggle */}
+          <button
+            onClick={() => setThemeMode(themeMode === "dark" ? "light" : "dark")}
+            style={{
+              background: "rgba(255, 255, 255, 0.08)",
+              backdropFilter: "blur(10px)",
+              border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+              color: accent,
+              padding: "8px 12px",
+              borderRadius: "12px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease",
+              fontSize: "12px"
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = "rgba(255, 255, 255, 0.12)";
+              e.target.style.transform = "translateY(-1px)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = "rgba(255, 255, 255, 0.08)";
+              e.target.style.transform = "translateY(0)";
+            }}
+          >
+            {themeMode === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
 
-  /* ═══════════════════════════════════════════
-     PINNED MODE
-  ═══════════════════════════════════════════ */
-  if (pinnedMode) return (
-    <div style={{ position:"fixed",bottom:20,right:20,zIndex:99999,background:T.bg,border:`1px solid ${running?T.accent:T.border}`,borderRadius:6,padding:"10px 14px",display:"flex",alignItems:"center",gap:12,fontFamily:"'Share Tech Mono',monospace",minWidth:180,boxShadow:`0 4px 20px rgba(0,0,0,0.4)`,transition:"border-color 0.3s" }}>
-      <div style={{ width:6,height:6,borderRadius:"50%",background:running?T.accent:T.textDim,flexShrink:0 }}/>
-      <span style={{ fontSize:8,letterSpacing:2,color:T.textDim,minWidth:32 }}>{phase==="work"?"WORK":"REST"}</span>
-      <span style={{ fontSize:20,color:T.accent,letterSpacing:-1,minWidth:60 }}>{fmt(secsLeft)}</span>
-      <button onClick={()=>setRunning(r=>!r)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",padding:2 }}>{running?<Pause size={13}/>:<Play size={13}/>}</button>
-      <button onClick={()=>resetTimer()} style={{ background:"none",border:"none",color:T.textDim,cursor:"pointer",padding:2 }}><RotateCcw size={11}/></button>
-      <button onClick={()=>setPinnedMode(false)} style={{ background:"none",border:"none",color:T.textDim,cursor:"pointer",padding:2,marginLeft:"auto" }}><Maximize2 size={11}/></button>
-    </div>
-  );
-
-return (
-  <div style={{ background:T.bg,width:"100vw",height:"100vh",color:T.text,fontFamily:"'Share Tech Mono',monospace",transition:"background 0.25s,color 0.25s",overflow:"hidden",position:"fixed",top:0,left:0 }}>
-    <div style={{ padding:"20px",textAlign:"center" }}>
-      <h1 style={{ color:T.accent,fontSize:"24px",marginBottom:"20px" }}>Pomodoros.io</h1>
-      <div style={{ fontSize:"48px",marginBottom:"20px" }}>
-        {Math.floor(secsLeft / 60)}:{(secsLeft % 60).toString().padStart(2, '0')}
+          {/* Wash Button */}
+          <button
+            onClick={openWashMode}
+            style={{
+              background: "rgba(255, 255, 255, 0.08)",
+              backdropFilter: "blur(10px)",
+              border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+              color: accent,
+              padding: "8px 12px",
+              borderRadius: "12px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease",
+              fontSize: "12px"
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = "rgba(255, 255, 255, 0.12)";
+              e.target.style.transform = "translateY(-1px)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = "rgba(255, 255, 255, 0.08)";
+              e.target.style.transform = "translateY(0)";
+            }}
+          >
+            <Monitor size={14} />
+          </button>
+        </div>
       </div>
-      <div style={{ marginBottom:"20px" }}>
-        <button onClick={()=>setRunning(r=>!r)} style={{ background:T.accent,color:T.bg,border:"none",padding:"10px 20px",marginRight:"10px",cursor:"pointer" }}>
-          {running ? 'Pause' : 'Start'}
-        </button>
-        <button onClick={()=>resetTimer()} style={{ background:T.accent,color:T.bg,border:"none",padding:"10px 20px",cursor:"pointer" }}>
-          Reset
-        </button>
+
+      {/* Main Content */}
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        padding: "0 30px"
+      }}>
+        {/* Timer Section */}
+        {tab === "timer" && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{
+              fontSize: "96px",
+              marginBottom: "40px",
+              letterSpacing: "4px",
+              fontWeight: "300",
+              color: accent,
+              fontVariantNumeric: "tabular-nums"
+            }}>
+              {formatTime(secsLeft)}
+            </div>
+            <div style={{
+              fontSize: "16px",
+              color: textDim,
+              marginBottom: "60px",
+              letterSpacing: "6px",
+              fontWeight: "500",
+              textTransform: "uppercase"
+            }}>
+              {phase === "work" ? "Focus" : "Rest"}
+            </div>
+            <div style={{
+              marginBottom: "60px",
+              display: "flex",
+              gap: "16px",
+              justifyContent: "center"
+            }}>
+              <button
+                onClick={() => setRunning(r => !r)}
+                style={{
+                  background: "rgba(255, 255, 255, 0.08)",
+                  backdropFilter: "blur(10px)",
+                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+                  color: accent,
+                  padding: "16px 32px",
+                  cursor: "pointer",
+                  fontSize: "16px",
+                  letterSpacing: "1px",
+                  borderRadius: "16px",
+                  transition: "all 0.2s ease",
+                  fontWeight: "500",
+                  minWidth: "120px"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.15)";
+                  e.target.style.transform = "translateY(-2px)";
+                  e.target.style.boxShadow = "0 8px 25px rgba(0,0,0,0.15)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.08)";
+                  e.target.style.transform = "translateY(0)";
+                  e.target.style.boxShadow = "none";
+                }}
+              >
+                {running ? 'Pause' : 'Start'}
+              </button>
+              <button
+                onClick={resetTimer}
+                style={{
+                  background: "rgba(255, 255, 255, 0.08)",
+                  backdropFilter: "blur(10px)",
+                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+                  color: accent,
+                  padding: "16px 32px",
+                  cursor: "pointer",
+                  fontSize: "16px",
+                  letterSpacing: "1px",
+                  borderRadius: "16px",
+                  transition: "all 0.2s ease",
+                  fontWeight: "500",
+                  minWidth: "120px"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.15)";
+                  e.target.style.transform = "translateY(-2px)";
+                  e.target.style.boxShadow = "0 8px 25px rgba(0,0,0,0.15)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.08)";
+                  e.target.style.transform = "translateY(0)";
+                  e.target.style.boxShadow = "none";
+                }}
+              >
+                Reset
+              </button>
+            </div>
+            <div style={{
+              display: "flex",
+              gap: "12px",
+              justifyContent: "center"
+            }}>
+              <button
+                onClick={() => { setPhase("work"); resetTimer("work"); }}
+                style={{
+                  background: phase === "work" ? "rgba(255, 255, 255, 0.15)" : "rgba(255, 255, 255, 0.05)",
+                  backdropFilter: "blur(10px)",
+                  border: `1px solid ${phase === "work" ? accent : (themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)")}`,
+                  color: phase === "work" ? accent : textDim,
+                  padding: "12px 24px",
+                  cursor: "pointer",
+                  borderRadius: "12px",
+                  transition: "all 0.2s ease",
+                  fontWeight: "500",
+                  fontSize: "14px",
+                  letterSpacing: "1px"
+                }}
+                onMouseEnter={(e) => {
+                  if (phase !== "work") {
+                    e.target.style.background = "rgba(255, 255, 255, 0.1)";
+                    e.target.style.transform = "translateY(-1px)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (phase !== "work") {
+                    e.target.style.background = "rgba(255, 255, 255, 0.05)";
+                    e.target.style.transform = "translateY(0)";
+                  }
+                }}
+              >
+                Work
+              </button>
+              <button
+                onClick={() => { setPhase("break"); resetTimer("break"); }}
+                style={{
+                  background: phase === "break" ? "rgba(255, 255, 255, 0.15)" : "rgba(255, 255, 255, 0.05)",
+                  backdropFilter: "blur(10px)",
+                  border: `1px solid ${phase === "break" ? accent : (themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)")}`,
+                  color: phase === "break" ? accent : textDim,
+                  padding: "12px 24px",
+                  cursor: "pointer",
+                  borderRadius: "12px",
+                  transition: "all 0.2s ease",
+                  fontWeight: "500",
+                  fontSize: "14px",
+                  letterSpacing: "1px"
+                }}
+                onMouseEnter={(e) => {
+                  if (phase !== "break") {
+                    e.target.style.background = "rgba(255, 255, 255, 0.1)";
+                    e.target.style.transform = "translateY(-1px)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (phase !== "break") {
+                    e.target.style.background = "rgba(255, 255, 255, 0.05)";
+                    e.target.style.transform = "translateY(0)";
+                  }
+                }}
+              >
+                Break
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Noise Section */}
+        {tab === "noise" && (
+          <div style={{ textAlign: "center", maxWidth: "400px" }}>
+            <h2 style={{
+              color: accent,
+              fontSize: "28px",
+              marginBottom: "40px",
+              fontWeight: "300",
+              letterSpacing: "2px"
+            }}>
+              Ambient Noise
+            </h2>
+            <div style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+              marginBottom: "30px"
+            }}>
+              {NOISE_TYPES.map(type => (
+                <button
+                  key={type}
+                  onClick={() => { setNoiseType(type); setNoiseOn(true); }}
+                  style={{
+                    background: noiseType === type && noiseOn ? "rgba(255, 255, 255, 0.15)" : "rgba(255, 255, 255, 0.05)",
+                    backdropFilter: "blur(10px)",
+                    border: `1px solid ${noiseType === type && noiseOn ? accent : (themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)")}`,
+                    color: noiseType === type && noiseOn ? accent : textDim,
+                    padding: "16px",
+                    cursor: "pointer",
+                    borderRadius: "12px",
+                    transition: "all 0.2s ease",
+                    fontWeight: "500",
+                    fontSize: "16px",
+                    letterSpacing: "1px",
+                    textTransform: "capitalize"
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!(noiseType === type && noiseOn)) {
+                      e.target.style.background = "rgba(255, 255, 255, 0.1)";
+                      e.target.style.transform = "translateY(-1px)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!(noiseType === type && noiseOn)) {
+                      e.target.style.background = "rgba(255, 255, 255, 0.05)";
+                      e.target.style.transform = "translateY(0)";
+                    }
+                  }}
+                >
+                  {type} Noise
+                </button>
+              ))}
+            </div>
+            {noiseOn && (
+              <button
+                onClick={() => setNoiseOn(false)}
+                style={{
+                  background: "rgba(255, 255, 255, 0.08)",
+                  backdropFilter: "blur(10px)",
+                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+                  color: accent,
+                  padding: "14px 28px",
+                  cursor: "pointer",
+                  borderRadius: "12px",
+                  transition: "all 0.2s ease",
+                  fontWeight: "500",
+                  fontSize: "14px",
+                  letterSpacing: "1px"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.12)";
+                  e.target.style.transform = "translateY(-1px)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.08)";
+                  e.target.style.transform = "translateY(0)";
+                }}
+              >
+                Stop Noise
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Note Section */}
+        {tab === "note" && (
+          <div style={{ textAlign: "center", maxWidth: "500px", width: "100%" }}>
+            <h2 style={{
+              color: accent,
+              fontSize: "28px",
+              marginBottom: "40px",
+              fontWeight: "300",
+              letterSpacing: "2px"
+            }}>
+              Notes
+            </h2>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Type your notes here..."
+              style={{
+                width: "100%",
+                height: "300px",
+                background: "rgba(255, 255, 255, 0.05)",
+                backdropFilter: "blur(10px)",
+                border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+                color: text,
+                padding: "20px",
+                borderRadius: "16px",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+                fontSize: "16px",
+                resize: "none",
+                transition: "all 0.2s ease",
+                outline: "none"
+              }}
+              onFocus={(e) => {
+                e.target.style.background = "rgba(255, 255, 255, 0.08)";
+                e.target.style.borderColor = accent;
+              }}
+              onBlur={(e) => {
+                e.target.style.background = "rgba(255, 255, 255, 0.05)";
+                e.target.style.borderColor = themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)";
+              }}
+            />
+          </div>
+        )}
+
+        {/* Stats Section */}
+        {tab === "stats" && (
+          <div style={{ textAlign: "center", maxWidth: "400px" }}>
+            <h2 style={{
+              color: accent,
+              fontSize: "28px",
+              marginBottom: "40px",
+              fontWeight: "300",
+              letterSpacing: "2px"
+            }}>
+              Today's Stats
+            </h2>
+            <div style={{
+              background: "rgba(255, 255, 255, 0.05)",
+              backdropFilter: "blur(10px)",
+              border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+              padding: "32px",
+              borderRadius: "16px",
+              textAlign: "center"
+            }}>
+              <div style={{
+                fontSize: "48px",
+                marginBottom: "16px",
+                color: accent,
+                fontWeight: "300",
+                letterSpacing: "2px"
+              }}>
+                0:00
+              </div>
+              <div style={{
+                color: textDim,
+                marginBottom: "32px",
+                fontSize: "14px",
+                letterSpacing: "1px"
+              }}>
+                Hours:Minutes Focused
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "16px"
+              }}>
+                <div style={{
+                  background: "rgba(255, 255, 255, 0.03)",
+                  padding: "20px",
+                  borderRadius: "12px"
+                }}>
+                  <div style={{
+                    color: textDim,
+                    fontSize: "12px",
+                    letterSpacing: "1px",
+                    marginBottom: "8px"
+                  }}>
+                    Work Duration
+                  </div>
+                  <div style={{
+                    fontSize: "24px",
+                    fontWeight: "300",
+                    color: accent
+                  }}>
+                    {workMin} min
+                  </div>
+                </div>
+                <div style={{
+                  background: "rgba(255, 255, 255, 0.03)",
+                  padding: "20px",
+                  borderRadius: "12px"
+                }}>
+                  <div style={{
+                    color: textDim,
+                    fontSize: "12px",
+                    letterSpacing: "1px",
+                    marginBottom: "8px"
+                  }}>
+                    Break Duration
+                  </div>
+                  <div style={{
+                    fontSize: "24px",
+                    fontWeight: "300",
+                    color: accent
+                  }}>
+                    {breakMin} min
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <div style={{ display:"flex",gap:"10px",justifyContent:"center",marginBottom:"20px" }}>
-        {["timer","noise","note","stats"].map(t=>(
-          <button key={t} onClick={()=>setTab(t)} style={{ background:tab===t?T.accent:"transparent",color:tab===t?T.bg:T.text,border:`1px solid ${T.accent}`,padding:"5px 10px",cursor:"pointer" }}>
-            {t.toUpperCase()}
+
+      {/* Segmented Control Navigation */}
+      <div style={{
+        position: "absolute",
+        bottom: "40px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: "rgba(255, 255, 255, 0.05)",
+        backdropFilter: "blur(10px)",
+        border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+        borderRadius: "16px",
+        padding: "4px",
+        display: "flex",
+        gap: "4px"
+      }}>
+        {["timer", "noise", "note", "stats"].map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              background: tab === t ? "rgba(255, 255, 255, 0.15)" : "transparent",
+              color: tab === t ? accent : textDim,
+              padding: "12px 20px",
+              cursor: "pointer",
+              borderRadius: "12px",
+              transition: "all 0.2s ease",
+              fontWeight: "500",
+              fontSize: "14px",
+              letterSpacing: "1px",
+              textTransform: "capitalize",
+              border: "none",
+              minWidth: "80px"
+            }}
+            onMouseEnter={(e) => {
+              if (tab !== t) {
+                e.target.style.background = "rgba(255, 255, 255, 0.08)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (tab !== t) {
+                e.target.style.background = "transparent";
+              }
+            }}
+          >
+            {t}
           </button>
         ))}
       </div>
     </div>
-  </div>
-);
+  );
 }
