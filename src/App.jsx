@@ -10,6 +10,23 @@ import {
    THEME SYSTEM
 ───────────────────────────────────────────── */
 const THEMES = {
+  midnightSlate: {
+    id: "midnightSlate",
+    bg:          "#1a1d23",
+    surface:     "#22262e",
+    border:      "rgba(200,200,200,0.08)",
+    borderBright:"rgba(200,200,200,0.15)",
+    accent:      "#e8e8e8",
+    accentDim:   "rgba(232,232,232,0.4)",
+    accentFaint: "rgba(232,232,232,0.08)",
+    text:        "#e8e8e8",
+    textDim:     "rgba(232,232,232,0.5)",
+    textFaint:   "rgba(232,232,232,0.25)",
+    glow:        "0 0 8px rgba(232,232,232,0.15)",
+    btnBg:       "#e8e8e8",
+    btnText:     "#1a1d23",
+    scanOpacity: "0.02",
+  },
   dark: {
     id: "dark",
     bg:          "#090909",
@@ -95,6 +112,57 @@ const THEMES = {
     btnText:     "#f8f8f8",
     scanOpacity: "0",
   },
+  studyHall: {
+    id: "studyHall",
+    bg:          "#f5f2e8",
+    surface:     "#faf8f0",
+    border:      "rgba(54,54,54,0.12)",
+    borderBright:"rgba(54,54,54,0.25)",
+    accent:      "#363636",
+    accentDim:   "rgba(54,54,54,0.4)",
+    accentFaint: "rgba(54,54,54,0.08)",
+    text:        "#363636",
+    textDim:     "rgba(54,54,54,0.5)",
+    textFaint:   "rgba(54,54,54,0.25)",
+    glow:        "0 0 6px rgba(54,54,54,0.1)",
+    btnBg:       "#363636",
+    btnText:     "#f5f2e8",
+    scanOpacity: "0.01",
+  },
+  deepWork: {
+    id: "deepWork",
+    bg:          "#2a2e35",
+    surface:     "#333942",
+    border:      "rgba(64,224,208,0.12)",
+    borderBright:"rgba(64,224,208,0.28)",
+    accent:      "#40e0d0",
+    accentDim:   "rgba(64,224,208,0.4)",
+    accentFaint: "rgba(64,224,208,0.08)",
+    text:        "#40e0d0",
+    textDim:     "rgba(64,224,208,0.5)",
+    textFaint:   "rgba(64,224,208,0.25)",
+    glow:        "0 0 8px rgba(64,224,208,0.15)",
+    btnBg:       "#40e0d0",
+    btnText:     "#2a2e35",
+    scanOpacity: "0.02",
+  },
+  office: {
+    id: "office",
+    bg:          "#fafbfc",
+    surface:     "#ffffff",
+    border:      "rgba(31,58,147,0.08)",
+    borderBright:"rgba(31,58,147,0.18)",
+    accent:      "#1f3a93",
+    accentDim:   "rgba(31,58,147,0.4)",
+    accentFaint: "rgba(31,58,147,0.06)",
+    text:        "#1f3a93",
+    textDim:     "rgba(31,58,147,0.5)",
+    textFaint:   "rgba(31,58,147,0.25)",
+    glow:        "0 0 6px rgba(31,58,147,0.08)",
+    btnBg:       "#1f3a93",
+    btnText:     "#fafbfc",
+    scanOpacity: "0",
+  },
 };
 
 function getSystemTheme() {
@@ -124,6 +192,7 @@ const LS_KEYS = {
   breakMin:  "ff_break_min",
   installed: "ff_pwa_installed",
   themeMode: "ff_theme_mode",
+  muted:     "ff_muted",
 };
 const APP_URL = window.location.href;
 
@@ -228,9 +297,77 @@ function ThemeToggle({ themeMode, setThemeMode, T }) {
 export default function Pomodoros() {
 
   /* ── THEME ── */
-  const [themeMode, setThemeMode] = useState(()=>localStorage.getItem(LS_KEYS.themeMode)||"dark");
-  const T = THEMES[themeMode]||THEMES.dark;
+  const [themeMode, setThemeMode] = useState(()=>localStorage.getItem(LS_KEYS.themeMode)||"midnightSlate");
+  const T = THEMES[themeMode]||THEMES.midnightSlate;
   useEffect(()=>{localStorage.setItem(LS_KEYS.themeMode,themeMode);},[themeMode]);
+
+  /* ── SOUND ── */
+  const [isMuted, setIsMuted] = useState(()=>localStorage.getItem(LS_KEYS.muted)==="true");
+  useEffect(()=>{localStorage.setItem(LS_KEYS.muted,isMuted);},[isMuted]);
+
+  /* ── NOTIFICATIONS ── */
+  const [showOverlay, setShowOverlay] = useState(false);
+
+  /* ── ZEN CHIME ── */
+  const playZenChime = useCallback(() => {
+    if (isMuted) return;
+    
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      // Create a gentle, smooth chime sound
+      oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5 note
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.01);
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.5);
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+      
+      // Clean up after sound finishes
+      setTimeout(() => {
+        audioContext.close();
+      }, 600);
+    } catch (error) {
+      console.log('Zen chime error:', error);
+    }
+  }, [isMuted]);
+
+  /* ── NOTIFICATION HANDLER ── */
+  const handleSessionComplete = useCallback(() => {
+    // Play Zen chime
+    playZenChime();
+    
+    // Show overlay if tab is active
+    if (!document.hidden) {
+      setShowOverlay(true);
+    }
+    
+    // Send desktop notification if tab is in background
+    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+      new Notification('Focus Session Complete', {
+        body: 'Time for a break!',
+        icon: '/favicon.ico',
+        tag: 'pomodoros-session-complete'
+      });
+    }
+    
+    // Request notification permission if not granted
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          console.log('Notification permission granted');
+        }
+      });
+    }
+  }, [playZenChime]);
 
   /* ── DERIVED STYLES ── */
   const S={
@@ -334,22 +471,9 @@ export default function Pomodoros() {
     if (!running){clearInterval(timerRef.current);return;}
     if (phase==="work") focusStartRef.current=Date.now();
     timerRef.current=setInterval(()=>{
-      setSecsLeft(s=>{
-        if (s<=1){
-          clearInterval(timerRef.current);
-          if (phaseRef.current==="work"&&focusStartRef.current){
-            const e2=Date.now()-focusStartRef.current;
-            setFocusMs(p=>{const n=p+e2;saveFocusMs(n);return n;});
-            focusStartRef.current=null; setSessions(n=>n+1);
-          }
-          const nx=phaseRef.current==="work"?"break":"work"; setPhase(nx); setRunning(false);
-          return nx==="work"?workMin*60:breakMin*60;
-        }
-        return s-1;
-      });
     },1000);
     return ()=>clearInterval(timerRef.current);
-  },[running]);
+  },[running, handleSessionComplete]);
 
   useEffect(()=>{
     if (!running&&phase==="work"&&focusStartRef.current){
@@ -414,34 +538,58 @@ export default function Pomodoros() {
   useEffect(()=>{
     if (!('wakeLock' in navigator)) return;
     
+    let wakeLock = null;
+    
     const requestWakeLock = async () => {
       try {
-        if (running) {
-          const wakeLock = await navigator.wakeLock.request('screen', {
+        if (running && !wakeLock) {
+          wakeLock = await navigator.wakeLock.request('screen', {
             preventSleep: true
           });
           
           wakeLock.addEventListener('release', () => {
-            // Lock released, allow sleep
+            wakeLock = null;
+            // Lock released, try to reacquire if still running
+            if (running && !document.hidden) {
+              setTimeout(requestWakeLock, 1000);
+            }
           });
           
-          return wakeLock;
+          console.log('Wake Lock acquired');
         }
       } catch (err) {
         console.log('Wake Lock error:', err);
+        wakeLock = null;
+      }
+    };
+    
+    const releaseWakeLock = () => {
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
       }
     };
     
     const handleVisibilityChange = async () => {
       if (document.hidden && running) {
+        // Request wake lock when tab becomes hidden
         await requestWakeLock();
+      } else if (!document.hidden && !running) {
+        // Release wake lock when tab becomes visible and timer is not running
+        releaseWakeLock();
       }
     };
+    
+    // Initial wake lock request if timer is running
+    if (running) {
+      requestWakeLock();
+    }
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
     
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      releaseWakeLock();
     };
   },[running]);
 
@@ -611,64 +759,69 @@ return (
                       } else if (elem.webkitRequestFullscreen) {
                         elem.webkitRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
                       } else if (elem.msRequestFullscreen) {
-                        elem.msRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
+                      
+                      function formatTime(seconds) {
+                        const mins = Math.floor(seconds / 60);
+                        const secs = seconds % 60;
+                        return mins + ":" + secs.toString().padStart(2, '0');
                       }
                       
-                      // Handle ESC key to exit fullscreen and close tab
-                      document.addEventListener('keydown', (e) => {
-                        if (e.key === 'Escape') {
-                          // Exit fullscreen first
-                          if (document.exitFullscreen) {
-                            document.exitFullscreen();
-                          } else if (document.webkitExitFullscreen) {
-                            document.webkitExitFullscreen();
-                          } else if (document.msExitFullscreen) {
-                            document.msExitFullscreen();
-                          }
-                          // Then close the window
-                          setTimeout(() => window.close(), 100);
-                        }
-                      });
+                      function updateDisplay() {
+                        const timerEl = document.getElementById('timer');
+                        const phaseEl = document.getElementById('phase');
+                        if (timerEl) timerEl.textContent = formatTime(secsLeft);
+                        if (phaseEl) phaseEl.textContent = phase === "work" ? "FOCUS" : "REST";
+                      }
                       
-                      // Fade out info message
-                      setTimeout(() => {
-                        const info = document.querySelector('.info');
-                        if (info) info.style.opacity = '0';
-                      }, 3000);
-                    </script>
-                  </body>
-                </html>
-              `);
-              newWindow.document.close();
-              
-              // Request fullscreen after document is ready
-              newWindow.addEventListener('load', () => {
-                const elem = newWindow.document.documentElement;
-                if (elem.requestFullscreen) {
+                      // Listen for updates from parent window
+                      window.addEventListener('message', (event) => {
+                        if (event.data.type === 'timer-update') {
+                          secsLeft = event.data.secsLeft;
                   elem.requestFullscreen().catch(err => console.log('Fullscreen error:', err));
-                } else if (elem.webkitRequestFullscreen) {
-                  elem.webkitRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
-                } else if (elem.msRequestFullscreen) {
-                  elem.msRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
-                }
-              });
-            }}
-              style={{ width:"clamp(80px,15vw,100px)",height:"clamp(60px,12vw,80px)",background:w.bg,border:gi===washIdx?`3px solid ${w.text}`:`2px solid ${w.text}33`,borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:"0 0 5px",boxShadow:gi===washIdx?`0 0 18px ${w.text}44`:undefined,transition:"all 0.15s",outline:"none" }}>
-                <span style={{ fontSize:"clamp(8px,2vw,10px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
-              </button>
           ))}
-          </div>
         </div>
-      )}
+      </div>
+    )}
 
-      {/* App shell */}
-      <div style={{ width:"100vw",height:"100vh",margin:0,padding:isOffline?"56px 20px 20px":"20px",display:"grid",gridTemplateColumns:"1fr",gridTemplateRows:"auto 1fr auto",overflow:"hidden" }}>
-
-        {/* Header */}
-        <header style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:28,flexWrap:"wrap",gap:"12px" }}>
-          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+    {/* ════ SESSION COMPLETE OVERLAY ════ */}
+    {showOverlay && (
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100vw",
+          height: "100vh",
+          zIndex: 10000,
+          background: "rgba(0,0,0,0.8)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            background: T.bg,
+            border: `2px solid ${T.accent}`,
+            borderRadius: 8,
+            padding: "24px 32px",
+            textAlign: "center",
+            boxShadow: `0 8px 32px rgba(0,0,0,0.3)`,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: "bold",
+              color: T.accent,
+              letterSpacing: 2,
+              marginBottom: 16,
+            }}
+          >
+            Focus Session Complete!
             <div style={{ width:8,height:8,borderRadius:"50%",background:T.accent,boxShadow:`0 0 10px ${T.accent}`,animation:"pulse 2s ease-in-out infinite" }}/>
-            <span style={{ fontFamily:"'Syne','Share Tech Mono',monospace",fontWeight:800,fontSize:18,color:T.accent,letterSpacing:-0.5 }}>Pomodoros</span>
+            <span style={{ fontFamily:"'Syne','Share Tech Mono',monospace",fontWeight:800,fontSize:18,color:T.accent,letterSpacing:-0.5 }}>Pomodoros.io</span>
             {isInstalled&&(
               <div style={{ display:"flex",alignItems:"center",gap:4,padding:"2px 6px",border:`1px solid ${T.border}`,borderRadius:2,background:T.accentFaint }}>
                 <Shield size={8} color={T.accent}/><span style={{ fontSize:7,letterSpacing:2,color:T.accent }}>PRO</span>
@@ -678,117 +831,194 @@ return (
           <div style={{ display:"flex",gap:6,alignItems:"center" }}>
             {/* Theme toggle — top right */}
             <ThemeToggle themeMode={themeMode} setThemeMode={setThemeMode} T={T}/>
-            <button onClick={()=>{
+            <button onClick={async ()=>{
               if (pipWindow) {
-                pipWindow.close();
+                if (pipWindow.close) {
+                  await pipWindow.close();
+                }
                 setPipWindow(null);
               } else {
-                // Enhanced PiP implementation with proper timer sync
-                const pipWindow = window.open('', 'width=300,height=150,left=100,top=100');
-                pipWindow.document.write(`
-                  <!DOCTYPE html>
-                  <html>
-                    <head>
-                      <title>Pomodoros Timer</title>
-                      <style>
-                        * { margin: 0; padding: 0; box-sizing: border-box; }
-                        body { 
-                          background: ${T.bg}; 
-                          color: ${T.accent}; 
-                          font-family: 'Share Tech Mono', monospace;
-                          font-weight: bold;
-                          display: flex; 
-                          align-items: center; 
-                          justify-content: center; 
-                          height: 100vh; 
-                          overflow: hidden;
-                          border: 2px solid ${T.accent};
-                          border-radius: 8px;
-                        }
-                        .timer {
-                          font-size: 24px;
-                          letter-spacing: 2px;
-                        }
-                        .phase {
-                          font-size: 10px;
-                          letter-spacing: 3px;
-                          opacity: 0.6;
-                          margin-top: 4px;
-                        }
-                      </style>
-                    </head>
-                    <body>
-                      <div>
-                        <div class="timer" id="timer">${Math.floor(secsLeft/60)}:${(secsLeft%60).toString().padStart(2,'0')}</div>
-                        <div class="phase" id="phase">${phase==="work"?"FOCUS":"REST"}</div>
-                      </div>
-                      <script>
-                        let secsLeft = ${secsLeft};
-                        let phase = "${phase}";
-                        let running = ${running};
-                        
-                        function formatTime(seconds) {
-                          const mins = Math.floor(seconds / 60);
-                          const secs = seconds % 60;
-                          return \`\${mins}:\${secs.toString().padStart(2, '0')}\`;
-                        }
-                        
-                        function updateDisplay() {
-                          const timerEl = document.getElementById('timer');
-                          const phaseEl = document.getElementById('phase');
-                          if (timerEl) timerEl.textContent = formatTime(secsLeft);
-                          if (phaseEl) phaseEl.textContent = phase === "work" ? "FOCUS" : "REST";
-                        }
-                        
-                        // Listen for updates from parent window
-                        window.addEventListener('message', (event) => {
-                          if (event.data.type === 'timer-update') {
-                            secsLeft = event.data.secsLeft;
-                            phase = event.data.phase;
-                            running = event.data.running;
-                            updateDisplay();
+                // True Picture-in-Picture API implementation
+                try {
+                  // Create a video element for PiP
+                  const video = document.createElement('video');
+                  video.style.width = '200px';
+                  video.style.height = '100px';
+                  video.style.background = T.bg;
+                  video.style.border = `1px solid ${T.accent}`;
+                  video.style.borderRadius = '8px';
+                  video.style.display = 'flex';
+                  video.style.alignItems = 'center';
+                  video.style.justifyContent = 'center';
+                  video.style.fontFamily = "'Share Tech Mono', monospace";
+                  video.style.fontSize = '18px';
+                  video.style.fontWeight = 'bold';
+                  video.style.color = T.accent;
+                  video.style.letterSpacing = '2px';
+                  video.style.padding = '10px';
+                  video.style.boxShadow = `0 4px 20px rgba(0,0,0,0.3)`;
+                  
+                  // Create canvas for rendering timer
+                  const canvas = document.createElement('canvas');
+                  canvas.width = 200;
+                  canvas.height = 100;
+                  const ctx = canvas.getContext('2d');
+                  
+                  // Function to draw timer on canvas
+                  const drawTimer = () => {
+                    ctx.fillStyle = T.bg;
+                    ctx.fillRect(0, 0, 200, 100);
+                    
+                    ctx.fillStyle = T.accent;
+                    ctx.font = 'bold 18px "Share Tech Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.letterSpacing = '2px';
+                    
+                    const mins = Math.floor(secsLeft / 60);
+                    const secs = secsLeft % 60;
+                    const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                    ctx.fillText(timeStr, 100, 50);
+                    
+                    // Add phase indicator
+                    ctx.font = '10px "Share Tech Mono", monospace';
+                    ctx.fillStyle = T.textDim;
+                    ctx.fillText(phase === "work" ? "FOCUS" : "REST", 100, 70);
+                  };
+                  
+                  // Start drawing
+                  drawTimer();
+                  const drawInterval = setInterval(drawTimer, 1000);
+                  
+                  // Set video source to canvas
+                  const stream = canvas.captureStream(30);
+                  video.srcObject = stream;
+                  video.play();
+                  
+                  // Request Picture-in-Picture
+                  pipWindow = await video.requestPictureInPicture({
+                    width: 200,
+                    height: 100
+                  });
+                  
+                  setPipWindow(pipWindow);
+                  
+                  // Handle PiP close
+                  pipWindow.addEventListener('close', () => {
+                    clearInterval(drawInterval);
+                    stream.getTracks().forEach(track => track.stop());
+                    setPipWindow(null);
+                  });
+                  
+                } catch (error) {
+                  console.log('PiP not supported, falling back to window:', error);
+                  // Fallback to window.open for browsers without PiP support
+                  const fallbackWindow = window.open('', 'width=200,height=100,left=100,top=100');
+                  fallbackWindow.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>Pomodoros Timer</title>
+                        <style>
+                          * { margin: 0; padding: 0; box-sizing: border-box; }
+                          body { 
+                            background: ${T.bg}; 
+                            color: ${T.accent}; 
+                            font-family: 'Share Tech Mono', monospace;
+                            font-weight: bold;
+                            display: flex; 
+                            align-items: center; 
+                            justify-content: center; 
+                            height: 100vh; 
+                            border: 1px solid ${T.accent};
+                            border-radius: 8px;
+                            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
                           }
-                        });
-                        
-                        // Initial display
-                        updateDisplay();
-                        
-                        // Countdown if running
-                        if (running) {
-                          setInterval(() => {
-                            if (secsLeft > 0 && running) {
-                              secsLeft--;
+                          .timer {
+                            font-size: 18px;
+                            letter-spacing: 2px;
+                          }
+                          .phase {
+                            font-size: 10px;
+                            opacity: 0.6;
+                            margin-top: 4px;
+                          }
+                        </style>
+                      </head>
+                      <body>
+                        <div>
+                          <div class="timer" id="timer">${Math.floor(secsLeft/60)}:${(secsLeft%60).toString().padStart(2,'0')}</div>
+                          <div class="phase" id="phase">${phase==="work"?"FOCUS":"REST"}</div>
+                        </div>
+                        <script>
+                          let secsLeft = ${secsLeft};
+                          let phase = "${phase}";
+                          let running = ${running};
+                          
+                          function formatTime(seconds) {
+                            const mins = Math.floor(seconds / 60);
+                            const secs = seconds % 60;
+                            return mins + ":" + secs.toString().padStart(2, '0');
+                          }
+                          
+                          function updateDisplay() {
+                            const timerEl = document.getElementById('timer');
+                            const phaseEl = document.getElementById('phase');
+                            if (timerEl) timerEl.textContent = formatTime(secsLeft);
+                            if (phaseEl) phaseEl.textContent = phase === "work" ? "FOCUS" : "REST";
+                          }
+                          
+                          // Listen for updates from parent window
+                          window.addEventListener('message', (event) => {
+                            if (event.data.type === 'timer-update') {
+                              secsLeft = event.data.secsLeft;
+                              phase = event.data.phase;
+                              running = event.data.running;
                               updateDisplay();
                             }
-                          }, 1000);
-                        }
-                        
-                        // Close on escape
-                        document.addEventListener('keydown', (e) => {
-                          if (e.key === 'Escape') {
-                            window.close();
+                          });
+                          
+                          // Initial display
+                          updateDisplay();
+                          
+                          // Countdown if running
+                          if (running) {
+                            setInterval(() => {
+                              if (secsLeft > 0 && running) {
+                                secsLeft--;
+                                updateDisplay();
+                              }
+                            }, 1000);
                           }
-                        });
-                      </script>
-                    </body>
-                  </html>
-                `);
-                setPipWindow(pipWindow);
-                
-                // Set up message passing to sync timer
-                const timerSyncInterval = setInterval(() => {
-                  if (pipWindow && !pipWindow.closed) {
-                    pipWindow.postMessage({
-                      type: 'timer-update',
-                      secsLeft: secsLeft,
-                      phase: phase,
-                      running: running
-                    }, '*');
-                  } else {
-                    clearInterval(timerSyncInterval);
-                    setPipWindow(null);
-                  }
-                }, 1000);
+                          
+                          // Close on escape
+                          document.addEventListener('keydown', (e) => {
+                            if (e.key === 'Escape') {
+                              window.close();
+                            }
+                          });
+                        </script>
+                      </body>
+                    </html>
+                  `);
+                  
+                  // Set up message passing for fallback
+                  const timerSyncInterval = setInterval(() => {
+                    if (fallbackWindow && !fallbackWindow.closed) {
+                      fallbackWindow.postMessage({
+                        type: 'timer-update',
+                        secsLeft: secsLeft,
+                        phase: phase,
+                        running: running
+                      }, '*');
+                    } else {
+                      clearInterval(timerSyncInterval);
+                      setPipWindow(null);
+                    }
+                  }, 1000);
+                  
+                  setPipWindow(fallbackWindow);
+                }
               }
             }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,padding:"5px 8px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
               <Pin size={11}/> {pipWindow ? 'UNPIN' : 'PIN'}
@@ -804,7 +1034,7 @@ return (
         <nav style={{ display:"flex",marginBottom:24,borderBottom:`1px solid ${T.border}`,flexWrap:"wrap",gap:"2px" }}>
           {[{id:"timer",label:"TIMER",icon:<Zap size={11}/>},{id:"noise",label:"NOISE",icon:<Volume2 size={11}/>},{id:"note",label:"NOTE",icon:<FileText size={11}/>},{id:"stats",label:"STATS",icon:<BarChart2 size={11}/>}].map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)}
-              style={{ flex:"1 1 auto",minWidth:"80px",background:"none",border:"none",borderBottom:tab===t.id?`2px solid ${T.accent}`:"2px solid transparent",color:tab===t.id?T.accent:T.textDim,padding:"8px 4px 10px",cursor:"pointer",fontSize:9,letterSpacing:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5,transition:"all 0.2s",marginBottom:-1 }}>
+              style={{ flex:"1 1 auto",minWidth:"80px",background:"none",border:"none",borderBottom:tab===t.id?`1px solid ${T.text}`:"1px solid transparent",color:tab===t.id?T.text:T.textDim,padding:"8px 4px 10px",cursor:"pointer",fontSize:9,letterSpacing:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5,transition:"all 0.2s",marginBottom:-1 }}>
               {t.icon} {t.label}
             </button>
           ))}
@@ -835,8 +1065,9 @@ return (
                 {running?<Pause size={20}/>:<Play size={20} style={{marginLeft:2}}/>}
               </button>
               <button onClick={()=>setShowSettings(s=>!s)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,width:40,height:40,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}><Settings size={14}/></button>
+              <button onClick={()=>setIsMuted(m=>!m)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,width:40,height:40,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>{isMuted?<VolumeX size={14}/>:<Volume2 size={14}/>}</button>
             </div>
-            <span style={{ fontSize:10,...S.dimText,letterSpacing:2 }}>[SPACE] TOGGLE · [R] RESET · [P] PIN</span>
+            <span style={{ fontSize:10,...S.dimText,letterSpacing:2 }}>[SPACE] TOGGLE · [R] RESET · [P] PIN · [M] {isMuted?"UNMUTE":"MUTE"}</span>
             {showSettings&&(
               <div style={{ width:"100%",border:`1px solid ${T.border}`,borderRadius:4,padding:20,background:T.accentFaint }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
