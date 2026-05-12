@@ -31,8 +31,8 @@ const THEMES = {
     id: "light",
     bg:          "#F4F4EF",
     surface:     "#FFFFFF",
-    border:      "rgba(0,100,30,0.18)",
-    borderBright:"rgba(0,130,40,0.55)",
+    border:      "rgba(0,107,28,0.18)",
+    borderBright:"rgba(0,107,28,0.55)",
     accent:      "#006B1C",
     accentDim:   "rgba(0,107,28,0.5)",
     accentFaint: "rgba(0,107,28,0.07)",
@@ -42,6 +42,57 @@ const THEMES = {
     glow:        "none",
     btnBg:       "#006B1C",
     btnText:     "#FFFFFF",
+    scanOpacity: "0",
+  },
+  forest: {
+    id: "forest",
+    bg:          "#0a1f0f",
+    surface:     "#1a2e1a",
+    border:      "rgba(34,139,34,0.12)",
+    borderBright:"rgba(34,139,34,0.28)",
+    accent:      "#2d5016",
+    accentDim:   "rgba(45,125,34,0.4)",
+    accentFaint: "rgba(45,125,34,0.08)",
+    text:        "#2d5016",
+    textDim:     "rgba(45,125,34,0.3)",
+    textFaint:   "rgba(45,125,34,0.15)",
+    glow:        "0 0 15px #2d5016, 0 0 30px rgba(45,125,34,0.3)",
+    btnBg:       "#2d5016",
+    btnText:     "#FFFFFF",
+    scanOpacity: "0.02",
+  },
+  cyberpunk: {
+    id: "cyberpunk",
+    bg:          "#0a0a0a",
+    surface:     "#1a0f1a",
+    border:      "rgba(255,0,255,0.12)",
+    borderBright:"rgba(255,0,255,0.35)",
+    accent:      "#ff00ff",
+    accentDim:   "rgba(255,0,255,0.4)",
+    accentFaint: "rgba(255,0,255,0.08)",
+    text:        "#ff00ff",
+    textDim:     "rgba(255,0,255,0.4)",
+    textFaint:   "rgba(255,0,255,0.18)",
+    glow:        "0 0 20px #ff00ff, 0 0 40px rgba(255,0,255,0.4), 0 0 60px rgba(255,0,255,0.2)",
+    btnBg:       "#ff00ff",
+    btnText:     "#000000",
+    scanOpacity: "0.05",
+  },
+  minimalist: {
+    id: "minimalist",
+    bg:          "#f8f8f8",
+    surface:     "#ffffff",
+    border:      "rgba(128,128,128,0.15)",
+    borderBright:"rgba(128,128,128,0.25)",
+    accent:      "#333333",
+    accentDim:   "rgba(51,51,51,0.4)",
+    accentFaint: "rgba(51,51,51,0.08)",
+    text:        "#333333",
+    textDim:     "rgba(51,51,51,0.3)",
+    textFaint:   "rgba(51,51,51,0.15)",
+    glow:        "none",
+    btnBg:       "#333333",
+    btnText:     "#f8f8f8",
     scanOpacity: "0",
   },
 };
@@ -215,6 +266,7 @@ export default function Pomodoros() {
 
   /* ── PINNED ── */
   const [pinnedMode, setPinnedMode] = useState(false);
+  const [pipWindow, setPipWindow] = useState(null);
 
   /* ── PWA ── */
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -346,6 +398,41 @@ export default function Pomodoros() {
     window.addEventListener("keydown",onKey);return ()=>window.removeEventListener("keydown",onKey);
   },[resetTimer]);
 
+  /* ── WAKE LOCK ── */
+  useEffect(()=>{
+    if (!('wakeLock' in navigator)) return;
+    
+    const requestWakeLock = async () => {
+      try {
+        if (running) {
+          const wakeLock = await navigator.wakeLock.request('screen', {
+            preventSleep: true
+          });
+          
+          wakeLock.addEventListener('release', () => {
+            // Lock released, allow sleep
+          });
+          
+          return wakeLock;
+        }
+      } catch (err) {
+        console.log('Wake Lock error:', err);
+      }
+    };
+    
+    const handleVisibilityChange = async () => {
+      if (document.hidden && running) {
+        await requestWakeLock();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  },[running]);
+
   /* ── COPY URL ── */
   const copyURL=async()=>{
     try{await navigator.clipboard.writeText(APP_URL);}
@@ -421,79 +508,218 @@ export default function Pomodoros() {
         </div>
       )}
 
-      {/* ════ COLOR WASH OVERLAY ════ */}
-      {washActive&&(
-        <div style={{ position:"fixed",top:0,left:0,width:"100vw",height:"100vh",zIndex:9999,background:currentWash.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0,transition:"background 0.25s ease" }}>
-          {/* Temporary ESC message */}
-          {showWashMessage && (
-            <div style={{ position:"absolute",top:20,left:"50%",transform:"translateX(-50%)",background:"rgba(0,0,0,0.8)",color:currentWash.text,padding:"8px 16px",borderRadius:4,fontSize:12,letterSpacing:1,fontFamily:"'Share Tech Mono',monospace",opacity:showWashMessage?1:0,transition:"opacity 0.5s ease" }}>
-              Press ESC to exit
-            </div>
-          )}
+/* ── DERIVED STYLES ── */
+const S={
+  timerRing:p=>({background:`conic-gradient(${T.accent} ${p*360}deg,${T.accentFaint} 0deg)`}),
+  glow:{textShadow:T.glow},
+  btnGlow:{boxShadow:`0 0 12px ${T.accentDim}`,background:T.btnBg,color:T.btnText},
+  dimText:{color:T.textDim},
+  faintText:{color:T.textFaint},
+  borderTop:{borderTop:`1px solid ${T.border}`},
+  font:{fontFamily:"'Share Tech Mono','Courier New',monospace"},
+  scanlines:{backgroundImage:`repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,${T.scanOpacity}) 2px,rgba(0,0,0,${T.scanOpacity}) 4px)`,pointerEvents:"none"},
+};
 
-          <span style={{ color:currentWash.text,fontSize:15,letterSpacing:6,opacity:0.65,marginBottom:4,fontFamily:"'Share Tech Mono',monospace" }}>{currentWash.label}</span>
+/* ═══════════════════════════════════════════
+   PINNED MODE
+  ═══════════════════════════════════════════ */
+if (pinnedMode) return (
+  <div style={{ position:"fixed",bottom:20,right:20,zIndex:99999,background:T.bg,border:`1px solid ${running?T.accent:T.border}`,borderRadius:6,padding:"10px 14px",display:"flex",alignItems:"center",gap:12,fontFamily:"'Share Tech Mono',monospace",minWidth:180,boxShadow:`0 4px 20px rgba(0,0,0,0.4)`,transition:"border-color 0.3s" }}>
+    <div style={{ width:6,height:6,borderRadius:"50%",background:running?T.accent:T.textDim,flexShrink:0 }}/>
+    <span style={{ fontSize:8,letterSpacing:2,color:T.textDim,minWidth:32 }}>{phase==="work"?"WORK":"REST"}</span>
+    <span style={{ fontSize:20,color:T.accent,letterSpacing:-1,minWidth:60 }}>{fmt(secsLeft)}</span>
+    <button onClick={()=>setRunning(r=>!r)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",padding:2 }}>{running?<Pause size={13}/>:<Play size={13}/>}</button>
+    <button onClick={()=>resetTimer()} style={{ background:"none",border:"none",color:T.textDim,cursor:"pointer",padding:2 }}><RotateCcw size={11}/></button>
+    <button onClick={()=>setPinnedMode(false)} style={{ background:"none",border:"none",color:T.textDim,cursor:"pointer",padding:2,marginLeft:"auto" }}><Maximize2 size={11}/></button>
+  </div>
+);
 
-          {/* Swatches */}
-          <div style={{ display:"flex",flexWrap:"wrap",gap:12,justifyContent:"center",maxWidth:"min(400px,80vw)",padding:"0 20px" }}>
-            {WASH_MODES.map((w,gi)=>(
-              <button key={w.label} onClick={()=>{
-                const newWindow = window.open('', '_blank');
-                newWindow.document.write(`
-                  <!DOCTYPE html>
-                  <html>
-                    <head>
-                      <title>${w.label} - Pomodoros</title>
-                      <style>
-                        * { margin: 0; padding: 0; box-sizing: border-box; }
-                        body { 
-                          background: ${w.bg}; 
-                          color: ${w.text}; 
-                          font-family: 'Share Tech Mono', monospace;
-                          display: flex; 
-                          align-items: center; 
-                          justify-content: center; 
-                          height: 100vh; 
-                          overflow: hidden;
-                        }
-                        .info {
-                          position: absolute;
-                          top: 20px;
-                          left: 50%;
-                          transform: translateX(-50%);
-                          background: rgba(0,0,0,0.8);
-                          color: ${w.text};
-                          padding: 8px 16px;
-                          border-radius: 4px;
-                          font-size: 12px;
-                          letter-spacing: 1px;
-                          opacity: 1;
-                          transition: opacity 0.5s ease;
-                        }
-                      </style>
-                    </head>
-                    <body>
-                      <div class="info">Press ESC to exit</div>
-                      <script>
-                        document.addEventListener('keydown', (e) => {
-                          if (e.key === 'Escape') {
-                            window.close();
+/* ═══════════════════════════════════════════
+   FULL UI
+  ═══════════════════════════════════════════ */
+return (
+  <div style={{ background:T.bg,width:"100vw",height:"100vh",color:T.text,...S.font,transition:"background 0.25s,color 0.25s",overflow:"hidden",position:"fixed",top:0,left:0 }}>
+
+    {/* Scanlines */}
+    <div style={{ position:"fixed",inset:0,zIndex:9998,...S.scanlines }}/>
+
+    {/* Pro badge */}
+    {showProBadge&&(
+      <div style={{ position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",zIndex:99999,background:T.bg,border:`1px solid ${T.accent}`,borderRadius:4,padding:"12px 20px",display:"flex",alignItems:"center",gap:10,boxShadow:`0 0 30px ${T.accentFaint}`,animation:"slideDown 0.3s ease" }}>
+        <Shield size={14} color={T.accent}/>
+        <div>
+          <div style={{ fontSize:11,letterSpacing:3,color:T.accent }}>PRO USER ACTIVATED</div>
+          <div style={{ fontSize:9,color:T.textDim,letterSpacing:1,marginTop:2 }}>Pomodoros installed · Works offline</div>
+        </div>
+      </div>
+    )}
+
+    {/* Offline banner */}
+    {isOffline&&(
+      <div style={{ position:"fixed",top:0,left:0,right:0,zIndex:9997,background:"rgba(255,200,0,0.08)",borderBottom:"1px solid rgba(255,200,0,0.25)",padding:"6px 16px",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontSize:9,letterSpacing:3,color:"#FFD700" }}>
+        <WifiOff size={10}/> OFFLINE MODE · ALL FEATURES AVAILABLE
+      </div>
+    )}
+
+    {/* ════ COLOR WASH OVERLAY ════ */}
+    {washActive&&(
+      <div style={{ position:"fixed",top:0,left:0,width:"100vw",height:"100vh",zIndex:9999,background:currentWash.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0,transition:"background 0.25s ease" }}>
+        {/* Temporary ESC message */}
+        {showWashMessage && (
+          <div style={{ position:"absolute",top:20,left:"50%",transform:"translateX(-50%)",background:"rgba(0,0,0,0.8)",color:currentWash.text,padding:"8px 16px",borderRadius:4,fontSize:12,letterSpacing:1,fontFamily:"'Share Tech Mono',monospace",opacity:showWashMessage?1:0,transition:"opacity 0.5s ease" }}>
+            Press ESC to exit
+          </div>
+        )}
+        <button onClick={()=>{
+          if (pipWindow) {
+            pipWindow.close();
+            setPipWindow(null);
+          } else {
+            // Simple PiP implementation
+            const pipWindow = window.open('', 'width=300,height=150,left=100,top=100');
+            pipWindow.document.write(`
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <title>Pomodoros Timer</title>
+                  <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body { 
+                      background: ${T.bg}; 
+                      color: ${T.accent}; 
+                      font-family: 'Share Tech Mono', monospace;
+                      font-weight: bold;
+                      display: flex; 
+                      align-items: center; 
+                      justify-content: center; 
+                      height: 100vh; 
+                      overflow: hidden;
+                      border: 2px solid ${T.accent};
+                      border-radius: 8px;
+                    }
+                    .timer {
+                      font-size: 24px;
+                      letter-spacing: 2px;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="timer">${fmt(secsLeft)}</div>
+                  <script>
+                    setInterval(() => {
+                      const timer = document.querySelector('.timer');
+                      if (timer) {
+                        timer.textContent = fmt(secsLeft);
+                      }
+                    }, 1000);
+                  </script>
+                </body>
+              </html>
+            `);
+            setPipWindow(pipWindow);
+          }
+        }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,padding:"5px 8px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
+          <Pin size={11}/> {pipWindow ? 'UNPIN' : 'PIN'}
+        </button>
+        <span style={{ color:currentWash.text,fontSize:15,letterSpacing:6,opacity:0.65,marginBottom:4,fontFamily:"'Share Tech Mono',monospace" }}>{currentWash.label}</span>
+
+        {/* Swatches */}
+        <div style={{ display:"flex",flexWrap:"wrap",gap:12,justifyContent:"center",maxWidth:"min(400px,80vw)",padding:"0 20px" }}>
+          {WASH_MODES.map((w,gi)=>(
+            <button key={w.label} onClick={()=>{
+              const newWindow = window.open('', '_blank');
+              newWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <title>${w.label} - Pomodoros</title>
+                    <style>
+                      * { margin: 0; padding: 0; box-sizing: border-box; }
+                      body { 
+                        background: ${w.bg}; 
+                        color: ${w.text}; 
+                        font-family: 'Share Tech Mono', monospace;
+                        display: flex; 
+                        align-items: center; 
+                        justify-content: center; 
+                        height: 100vh; 
+                        overflow: hidden;
+                        cursor: none;
+                      }
+                      .info {
+                        position: absolute;
+                        top: 20px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        background: rgba(0,0,0,0.8);
+                        color: ${w.text};
+                        padding: 8px 16px;
+                        border-radius: 4px;
+                        font-size: 12px;
+                        letter-spacing: 1px;
+                        opacity: 1;
+                        transition: opacity 0.5s ease;
+                        z-index: 1000;
+                      }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="info">Press ESC to exit</div>
+                    <script>
+                      // Request fullscreen immediately
+                      const elem = document.documentElement;
+                      if (elem.requestFullscreen) {
+                        elem.requestFullscreen().catch(err => console.log('Fullscreen error:', err));
+                      } else if (elem.webkitRequestFullscreen) {
+                        elem.webkitRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
+                      } else if (elem.msRequestFullscreen) {
+                        elem.msRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
+                      }
+                      
+                      // Handle ESC key to exit fullscreen and close tab
+                      document.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape') {
+                          // Exit fullscreen first
+                          if (document.exitFullscreen) {
+                            document.exitFullscreen();
+                          } else if (document.webkitExitFullscreen) {
+                            document.webkitExitFullscreen();
+                          } else if (document.msExitFullscreen) {
+                            document.msExitFullscreen();
                           }
-                        });
-                        setTimeout(() => {
-                          document.querySelector('.info').style.opacity = '0';
-                        }, 3000);
-                      </script>
-                    </body>
-                  </html>
-                `);
-                newWindow.document.close();
-                if (newWindow.document.documentElement.requestFullscreen) {
-                  newWindow.document.documentElement.requestFullscreen();
-                } else if (newWindow.document.documentElement.webkitRequestFullscreen) {
-                  newWindow.document.documentElement.webkitRequestFullscreen();
-                } else if (newWindow.document.documentElement.msRequestFullscreen) {
-                  newWindow.document.documentElement.msRequestFullscreen();
+                          // Then close the window
+                          setTimeout(() => window.close(), 100);
+                        }
+                      });
+                      
+                      // Fade out info message
+                      setTimeout(() => {
+                        const info = document.querySelector('.info');
+                        if (info) info.style.opacity = '0';
+                      }, 3000);
+                    </script>
+                  </body>
+                </html>
+              `);
+              newWindow.document.close();
+              
+              // Request fullscreen after document is ready
+              newWindow.addEventListener('load', () => {
+                const elem = newWindow.document.documentElement;
+                if (elem.requestFullscreen) {
+                  elem.requestFullscreen().catch(err => console.log('Fullscreen error:', err));
+                } else if (elem.webkitRequestFullscreen) {
+                  elem.webkitRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
+                } else if (elem.msRequestFullscreen) {
+                  elem.msRequestFullscreen().catch(err => console.log('Fullscreen error:', err));
                 }
+              });
+            }}
+              style={{ width:"clamp(80px,15vw,100px)",height:"clamp(60px,12vw,80px)",background:w.bg,border:gi===washIdx?`3px solid ${w.text}`:`2px solid ${w.text}33`,borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:"0 0 5px",boxShadow:gi===washIdx?`0 0 18px ${w.text}44`:undefined,transition:"all 0.15s",outline:"none" }}>
+                <span style={{ fontSize:"clamp(8px,2vw,10px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
+              </button>
+          ))}
+                });
               }}
                 style={{ width:"clamp(80px,15vw,100px)",height:"clamp(60px,12vw,80px)",background:w.bg,border:gi===washIdx?`3px solid ${w.text}`:`2px solid ${w.text}33`,borderRadius:5,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:"0 0 5px",boxShadow:gi===washIdx?`0 0 18px ${w.text}44`:undefined,transition:"all 0.15s",outline:"none" }}>
                   <span style={{ fontSize:"clamp(8px,2vw,10px)",color:w.text,letterSpacing:1,opacity:0.65,fontFamily:"'Share Tech Mono',monospace" }}>{w.label}</span>
@@ -520,19 +746,13 @@ export default function Pomodoros() {
           <div style={{ display:"flex",gap:6,alignItems:"center" }}>
             {/* Theme toggle — top right */}
             <ThemeToggle themeMode={themeMode} setThemeMode={setThemeMode} T={T}/>
-            {noiseOn&&(
-              <div style={{ display:"flex",alignItems:"center",gap:5,padding:"3px 8px",border:`1px solid ${T.border}`,borderRadius:2 }}>
-                <Volume2 size={10} color={T.accent}/><span style={{ fontSize:9,color:T.accent,letterSpacing:2 }}>{noiseType.toUpperCase()}</span>
-              </div>
-            )}
-            <button onClick={()=>setPinnedMode(true)} title="Pinned Mode [P]"
-              style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,padding:"5px 8px",borderRadius:2,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontSize:9,letterSpacing:2 }}>
-              <Pin size={11}/> PIN
             </button>
             <button onClick={()=>setWashActive(true)} title="Color Wash [C]"
               style={{ background:"none",border:`1px solid ${T.border}`,color:T.accent,padding:"5px 8px",borderRadius:2,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontSize:9,letterSpacing:2 }}>
               <Monitor size={11}/> WASH
             </button>
+        </div>
+      </header>
           </div>
         </header>
 
@@ -560,7 +780,7 @@ export default function Pomodoros() {
             <div style={{ position:"relative",width:"clamp(280px,50vw,320px)",height:"clamp(280px,50vw,320px)" }}>
               <div style={{ position:"absolute",inset:0,borderRadius:"50%",...S.timerRing(pct),padding:8,transition:"background 0.5s linear" }}>
                 <div style={{ background:T.bg,borderRadius:"50%",width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4 }}>
-                  <span style={{ fontSize:"clamp(42px,8vw,64px)",color:T.accent,letterSpacing:-2,...S.glow }}>{fmt(secsLeft)}</span>
+                  <span style={{ fontSize:"clamp(48px,9vw,72px)",fontWeight:"bold",color:T.accent,letterSpacing:-2,...S.glow }}>{fmt(secsLeft)}</span>
                   <span style={{ fontSize:9,letterSpacing:4,...S.dimText }}>{phase==="work"?"FOCUS":"REST"}</span>
                 </div>
               </div>
@@ -700,20 +920,6 @@ export default function Pomodoros() {
                 <Download size={10}/> INSTALL APP
               </button>
             ) : isInstalled ? (
-              <button style={{ background:T.accentFaint,border:`1px solid ${T.border}`,color:T.accent,padding:"5px 10px",borderRadius:2,cursor:"default",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
-                <Shield size={10}/> APP INSTALLED
-              </button>
-            ) : (
-              <div style={{ position:"relative" }}>
-                <button onClick={()=>setShowBookmarkTip(v=>!v)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.textDim,padding:"5px 10px",borderRadius:2,cursor:"pointer",fontSize:9,letterSpacing:2,display:"flex",alignItems:"center",gap:5 }}>
-                  <Bookmark size={10}/> BOOKMARK
-                </button>
-                {showBookmarkTip&&(
-                  <div style={{ position:"absolute",bottom:"calc(100% + 8px)",left:0,background:T.surface||T.bg,border:`1px solid ${T.border}`,borderRadius:3,padding:"10px 14px",whiteSpace:"nowrap",zIndex:100,boxShadow:`0 4px 20px rgba(0,0,0,0.25)` }}>
-                    <div style={{ fontSize:9,letterSpacing:2,color:T.accent,marginBottom:6 }}>KEEP THIS TOOL HANDY</div>
-                    <div style={{ fontSize:9,color:T.textDim,letterSpacing:1 }}>
-                      Press <span style={{ border:`1px solid ${T.border}`,padding:"1px 5px",borderRadius:2,color:T.accent }}>Ctrl+D</span> or <span style={{ border:`1px solid ${T.border}`,padding:"1px 5px",borderRadius:2,color:T.accent }}>⌘+D</span>
-                    </div>
                     <button onClick={()=>setShowBookmarkTip(false)} style={{ position:"absolute",top:4,right:6,background:"none",border:"none",color:T.textDim,cursor:"pointer",fontSize:10 }}>×</button>
                   </div>
                 )}
