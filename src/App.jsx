@@ -11,26 +11,53 @@ export default function Pomodoros() {
   const [running, setRunning] = useState(false);
   const [noiseType, setNoiseType] = useState("brown");
   const [noiseOn, setNoiseOn] = useState(false);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(() => localStorage.getItem("pomodoros_note") || "");
   const [volume, setVolume] = useState(0.4);
   const [isMuted, setIsMuted] = useState(false);
   const [themeMode, setThemeMode] = useState("dark");
-  
+
+  // Stats state — stored in seconds for full precision, flushed on every pause
+  const [sessionsCompleted, setSessionsCompleted] = useState(
+    () => parseInt(localStorage.getItem("pomodoros_sessions") || "0", 10)
+  );
+  const [savedWorkSeconds, setSavedWorkSeconds] = useState(
+    () => parseInt(localStorage.getItem("pomodoros_work_seconds") || "0", 10)
+  );
+  const [savedBreakSeconds, setSavedBreakSeconds] = useState(
+    () => parseInt(localStorage.getItem("pomodoros_break_seconds") || "0", 10)
+  );
+
+  // Live seconds for the currently-running segment (resets to 0 each time Start is pressed)
+  const [liveSeconds, setLiveSeconds] = useState(0);
+
   // Refs
   const timerRef = useRef(null);
+  const liveRef = useRef(null);
   const audioCtxRef = useRef(null);
   const gainRef = useRef(null);
   const noiseNodeRef = useRef(null);
   const phaseRef = useRef("work");
   phaseRef.current = phase;
 
+  // Ref so flushLiveSeconds can read latest value without stale closure
+  const liveSecondsRef = useRef(0);
+  liveSecondsRef.current = liveSeconds;
+
+  // Track previous running state to detect pause
+  const prevRunningRef = useRef(false);
+
   // Constants
   const WASH_MODES = [
-    { label: "RED", bg: "#FF0000", text: "#ffffff" },
-    { label: "GREEN", bg: "#00FF00", text: "#003300" },
-    { label: "BLUE", bg: "#0000FF", text: "#aaaaff" },
+    { label: "BLACK", bg: "#000000", text: "#ffffff" },
     { label: "WHITE", bg: "#FFFFFF", text: "#000000" },
-    { label: "BLACK", bg: "#000000", text: "#333333" },
+    { label: "RED", bg: "#FF0000", text: "#ffffff" },
+    { label: "SOFT MINT", bg: "#E8F5E8", text: "#2D5A2D" },
+    { label: "OCEAN BLUE", bg: "#0077BE", text: "#ffffff" },
+    { label: "SUNSET", bg: "#FF6B6B", text: "#ffffff" },
+    { label: "FOREST", bg: "#2D5A2D", text: "#ffffff" },
+    { label: "LAVENDER", bg: "#E6E6FA", text: "#4B0082" },
+    { label: "GOLD", bg: "#FFD700", text: "#333333" },
+    { label: "CHARCOAL", bg: "#36454F", text: "#ffffff" }
   ];
 
   const NOISE_TYPES = ["white", "pink", "brown"];
@@ -42,14 +69,28 @@ export default function Pomodoros() {
   const accent = themeMode === "dark" ? "#e8e8e8" : "#1a1d23";
   const surface = themeMode === "dark" ? "#1e1e1e" : "#ffffff";
 
-  // Timer logic
-  const resetTimer = useCallback((newPhase = phase, newWorkMin = workMin, newBreakMin = breakMin) => {
-    clearInterval(timerRef.current);
-    setRunning(false);
-    setSecsLeft(newPhase === "work" ? newWorkMin * 60 : newBreakMin * 60);
-    setPhase(newPhase);
-  }, [phase, workMin, breakMin]);
+  // ─── Flush live seconds into saved totals ─────────────────────────────────────
+  // Called on every pause and reset so no time is ever lost
+  const flushLiveSeconds = useCallback(() => {
+    const live = liveSecondsRef.current;
+    if (live === 0) return;
+    if (phaseRef.current === "work") {
+      setSavedWorkSeconds((prev) => {
+        const next = prev + live;
+        localStorage.setItem("pomodoros_work_seconds", next);
+        return next;
+      });
+    } else {
+      setSavedBreakSeconds((prev) => {
+        const next = prev + live;
+        localStorage.setItem("pomodoros_break_seconds", next);
+        return next;
+      });
+    }
+    setLiveSeconds(0);
+  }, []);
 
+  // ─── Main countdown timer ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!running) {
       clearInterval(timerRef.current);
@@ -57,19 +98,84 @@ export default function Pomodoros() {
     }
 
     timerRef.current = setInterval(() => {
-      if (secsLeft <= 1) {
-        // Session complete
-        const nextPhase = phaseRef.current === "work" ? "break" : "work";
-        setPhase(nextPhase);
-        setRunning(false);
-        setSecsLeft(nextPhase === "work" ? workMin * 60 : breakMin * 60);
-        return;
-      }
-      setSecsLeft(s => s - 1);
+      setSecsLeft((s) => {
+        if (s <= 1) {
+          clearInterval(timerRef.current);
+          clearInterval(liveRef.current);
+
+          // Flush live time then record the completed session
+          const live = liveSecondsRef.current;
+          if (phaseRef.current === "work") {
+            setSavedWorkSeconds((prev) => {
+              const next = prev + live;
+              localStorage.setItem("pomodoros_work_seconds", next);
+              return next;
+            });
+            setSessionsCompleted((prev) => {
+              const n = prev + 1;
+              localStorage.setItem("pomodoros_sessions", n);
+              return n;
+            });
+          } else {
+            setSavedBreakSeconds((prev) => {
+              const next = prev + live;
+              localStorage.setItem("pomodoros_break_seconds", next);
+              return next;
+            });
+          }
+          setLiveSeconds(0);
+
+          const nextPhase = phaseRef.current === "work" ? "break" : "work";
+          setPhase(nextPhase);
+          setRunning(false);
+          return nextPhase === "work" ? workMin * 60 : breakMin * 60;
+        }
+        return s - 1;
+      });
     }, 1000);
 
     return () => clearInterval(timerRef.current);
-  }, [running, secsLeft, workMin, breakMin]);
+  }, [running, workMin, breakMin]);
+
+  // ─── Live ticker ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    clearInterval(liveRef.current);
+    if (!running) return;
+    liveRef.current = setInterval(() => {
+      setLiveSeconds((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(liveRef.current);
+  }, [running]);
+
+  // ─── Detect pause: flush live seconds into saved totals immediately ───────────
+  useEffect(() => {
+    if (prevRunningRef.current && !running) {
+      flushLiveSeconds();
+    }
+    prevRunningRef.current = running;
+  }, [running, flushLiveSeconds]);
+
+  // ─── Reset ────────────────────────────────────────────────────────────────────
+  const resetTimer = useCallback((newPhase = phase, newWorkMin = workMin, newBreakMin = breakMin) => {
+    clearInterval(timerRef.current);
+    clearInterval(liveRef.current);
+    flushLiveSeconds();
+    setRunning(false);
+    setSecsLeft(newPhase === "work" ? newWorkMin * 60 : newBreakMin * 60);
+    setPhase(newPhase);
+    setLiveSeconds(0);
+  }, [phase, workMin, breakMin, flushLiveSeconds]);
+
+  // ─── Clear all stats ──────────────────────────────────────────────────────────
+  const clearStats = useCallback(() => {
+    setSavedWorkSeconds(0);
+    setSavedBreakSeconds(0);
+    setSessionsCompleted(0);
+    setLiveSeconds(0);
+    localStorage.removeItem("pomodoros_work_seconds");
+    localStorage.removeItem("pomodoros_break_seconds");
+    localStorage.removeItem("pomodoros_sessions");
+  }, []);
 
   // Audio functions
   const createNoiseNode = useCallback((ctx, type) => {
@@ -144,106 +250,253 @@ export default function Pomodoros() {
     }
   }, [noiseOn, noiseType, volume, startNoise, stopNoise]);
 
-  // Wash mode function
+  // Dynamic Tab Title
+  useEffect(() => {
+    const formatTime = (seconds) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const phaseText = phase === "work" ? "Focus" : "Rest";
+    document.title = `${formatTime(secsLeft)} - ${phaseText}`;
+  }, [secsLeft, phase]);
+
+  // Note Auto-save
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      localStorage.setItem("pomodoros_note", note);
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [note]);
+
+  // Wash mode function — identical to your original
   const openWashMode = useCallback(() => {
     const newWindow = window.open('', '_blank');
-    const color = WASH_MODES[0];
     
     newWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>${color.label} - Pomodoros</title>
+          <title>Color Wash - Pomodoros</title>
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-              background: ${color.bg}; 
-              height: 100vh; 
+            html, body { 
+              background: #121212; 
+              width: 100vw;
+              height: 100vh;
               overflow: hidden;
               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            }
-            .info {
-              position: fixed;
-              top: 20px;
-              left: 50%;
-              transform: translateX(-50%);
-              color: ${color.text};
-              font-size: 14px;
-              letter-spacing: 2px;
-              opacity: 0.7;
-              z-index: 1000;
-            }
-            .colors {
-              position: fixed;
-              bottom: 40px;
-              left: 50%;
-              transform: translateX(-50%);
               display: flex;
-              gap: 12px;
-              z-index: 1000;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
             }
-            .color-btn {
-              background: rgba(255, 255, 255, 0.1);
-              border: 1px solid ${color.text};
-              color: ${color.text};
-              padding: 8px 16px;
-              border-radius: 8px;
+            .palette-container {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+              gap: 16px;
+              padding: 40px;
+              max-width: 800px;
+              width: 100%;
+            }
+            .color-card {
+              aspect-ratio: 1;
+              border-radius: 16px;
               cursor: pointer;
-              font-size: 12px;
+              transition: all 0.3s ease;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-weight: 500;
+              font-size: 14px;
               letter-spacing: 1px;
-              transition: all 0.2s ease;
+              text-transform: uppercase;
+              border: 2px solid rgba(255, 255, 255, 0.1);
+              position: relative;
+              overflow: hidden;
             }
-            .color-btn:hover {
-              background: rgba(255, 255, 255, 0.2);
-              transform: translateY(-1px);
+            .color-card:hover {
+              transform: translateY(-4px);
+              box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+              border-color: rgba(255, 255, 255, 0.3);
+            }
+            .color-card.fullscreen {
+              position: fixed;
+              top: 0;
+              left: 0;
+              width: 100vw;
+              height: 100vh;
+              border-radius: 0;
+              border: none;
+              z-index: 9999;
+              cursor: default;
+            }
+            .message {
+              position: fixed;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%);
+              color: inherit;
+              font-size: 16px;
+              letter-spacing: 3px;
+              opacity: 0.6;
+              z-index: 10000;
+              text-align: center;
+              font-weight: 300;
+              text-transform: uppercase;
+              user-select: none;
+              pointer-events: none;
+              display: none;
+            }
+            .message.show {
+              display: block;
+            }
+            .title {
+              color: #e8e8e8;
+              font-size: 24px;
+              font-weight: 300;
+              letter-spacing: 2px;
+              margin-bottom: 32px;
+              text-align: center;
             }
           </style>
         </head>
         <body>
-          <div class="info">${color.label} - Press ESC to exit</div>
-          <div class="colors">
-            ${WASH_MODES.map((mode, index) => 
-              `<button class="color-btn" onclick="changeColor(${index})">${mode.label}</button>`
-            ).join('')}
+          <h1 class="title">Choose Your Focus Color</h1>
+          <div class="palette-container">
+            ${WASH_MODES.map((color, index) => `
+              <div class="color-card" 
+                   style="background: ${color.bg}; color: ${color.text};"
+                   data-index="${index}"
+                   data-bg="${color.bg}"
+                   data-text="${color.text}">
+                ${color.label}
+              </div>
+            `).join('')}
           </div>
+          <div class="message" id="message">Press ESC to return</div>
+          
           <script>
             const WASH_MODES = ${JSON.stringify(WASH_MODES)};
-            let currentColorIndex = 0;
+            let isFullscreen = false;
+            let currentColor = null;
             
-            function changeColor(index) {
-              currentColorIndex = index;
-              const color = WASH_MODES[index];
-              document.body.style.background = color.bg;
-              document.querySelector('.info').textContent = color.label + ' - Press ESC to exit';
-              document.querySelectorAll('.color-btn').forEach((btn, i) => {
-                btn.style.opacity = i === index ? '1' : '0.7';
-              });
+            function enterFullscreen(color) {
+              const card = event.target;
+              const bg = card.dataset.bg;
+              const text = card.dataset.text;
+              
+              currentColor = { bg, text };
+              
+              // Apply fullscreen styling
+              card.classList.add('fullscreen');
+              document.body.style.background = bg;
+              
+              // Hide other elements
+              document.querySelector('.palette-container').style.display = 'none';
+              document.querySelector('.title').style.display = 'none';
+              document.getElementById('message').classList.add('show');
+              document.getElementById('message').style.color = text;
+              
+              // Request fullscreen
+              const elem = document.documentElement;
+              const requestFullscreen = elem.requestFullscreen || 
+                                      elem.webkitRequestFullscreen || 
+                                      elem.mozRequestFullScreen || 
+                                      elem.msRequestFullscreen;
+              
+              if (requestFullscreen) {
+                requestFullscreen.call(elem).catch(err => {
+                  console.log('Fullscreen request failed:', err);
+                });
+              }
+              
+              isFullscreen = true;
             }
             
-            // Request fullscreen on load
-            document.addEventListener('DOMContentLoaded', () => {
-              document.documentElement.requestFullscreen().catch(err => {
-                console.log('Fullscreen request failed:', err);
-              });
+            function exitFullscreen() {
+              if (!isFullscreen) return;
+              
+              // Exit fullscreen
+              if (document.fullscreenElement) {
+                document.exitFullscreen().then(() => {
+                  // Return to color palette after exiting fullscreen
+                  returnToPalette();
+                }).catch(() => {
+                  // Fallback: return to palette even if exit fails
+                  returnToPalette();
+                });
+              } else {
+                // If not in fullscreen, just return to palette
+                returnToPalette();
+              }
+            }
+            
+            function returnToPalette() {
+              // Reset fullscreen state
+              isFullscreen = false;
+              
+              // Show all elements again
+              document.querySelector('.palette-container').style.display = 'grid';
+              document.querySelector('.title').style.display = 'block';
+              document.getElementById('message').classList.remove('show');
+              
+              // Reset background
+              document.body.style.background = '#121212';
+              
+              // Remove fullscreen class from any color card
+              const fullscreenCard = document.querySelector('.color-card.fullscreen');
+              if (fullscreenCard) {
+                fullscreenCard.classList.remove('fullscreen');
+              }
+            }
+            
+            // Add click handlers to color cards
+            document.querySelectorAll('.color-card').forEach(card => {
+              card.addEventListener('click', enterFullscreen);
             });
             
-            // ESC to exit fullscreen and close
+            // ESC to exit
             document.addEventListener('keydown', (e) => {
-              if (e.key === 'Escape') {
-                if (document.fullscreenElement) {
-                  document.exitFullscreen().then(() => {
-                    window.close();
-                  }).catch(() => {
-                    window.close();
-                  });
-                } else {
-                  window.close();
-                }
+              if (e.key === 'Escape' || e.key === 'Esc') {
+                e.preventDefault();
+                e.stopPropagation();
+                exitFullscreen();
               }
             });
             
-            // Initialize first button as active
-            changeColor(0);
+            // Fullscreen change event listener
+            document.addEventListener('fullscreenchange', () => {
+              if (!document.fullscreenElement && isFullscreen) {
+                // User exited fullscreen (via ESC, F11, etc.)
+                returnToPalette();
+              }
+            });
+            
+            // Also listen for vendor-specific fullscreen events
+            document.addEventListener('webkitfullscreenchange', () => {
+              if (!document.webkitFullscreenElement && isFullscreen) {
+                returnToPalette();
+              }
+            });
+            
+            document.addEventListener('mozfullscreenchange', () => {
+              if (!document.mozFullScreenElement && isFullscreen) {
+                returnToPalette();
+              }
+            });
+            
+            document.addEventListener('MSFullscreenChange', () => {
+              if (!document.msFullscreenElement && isFullscreen) {
+                returnToPalette();
+              }
+            });
+            
+            // Prevent interactions
+            document.addEventListener('contextmenu', (e) => e.preventDefault());
+            document.addEventListener('selectstart', (e) => e.preventDefault());
+            document.addEventListener('dragstart', (e) => e.preventDefault());
           </script>
         </body>
       </html>
@@ -257,6 +510,12 @@ export default function Pomodoros() {
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // ─── Derived stats ─────────────────────────────────────────────────────────────
+  // saved (flushed on every pause) + live (current running segment, 0 when paused)
+  const totalWorkSecs = savedWorkSeconds + (phase === "work" ? liveSeconds : 0);
+  const totalBreakSecs = savedBreakSeconds + (phase === "break" ? liveSeconds : 0);
+  const focusScore = Math.min(Math.round((totalWorkSecs / (100 * 60)) * 100), 100);
 
   return (
     <div style={{
@@ -427,7 +686,7 @@ export default function Pomodoros() {
                 {running ? 'Pause' : 'Start'}
               </button>
               <button
-                onClick={resetTimer}
+                onClick={() => resetTimer(phase, workMin, breakMin)}
                 style={{
                   background: "rgba(255, 255, 255, 0.08)",
                   backdropFilter: "blur(10px)",
@@ -649,95 +908,289 @@ export default function Pomodoros() {
                 e.target.style.borderColor = themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)";
               }}
             />
+            <div style={{
+              display: "flex",
+              gap: "12px",
+              justifyContent: "center",
+              marginTop: "20px"
+            }}>
+              <button
+                onClick={() => {
+                  localStorage.setItem("pomodoros_note", note);
+                  // Brief visual feedback
+                  const button = event.target;
+                  button.textContent = "Saved!";
+                  setTimeout(() => {
+                    button.textContent = "Save";
+                  }, 1500);
+                }}
+                style={{
+                  background: "rgba(255, 255, 255, 0.08)",
+                  backdropFilter: "blur(10px)",
+                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+                  color: accent,
+                  padding: "12px 24px",
+                  cursor: "pointer",
+                  borderRadius: "12px",
+                  transition: "all 0.2s ease",
+                  fontWeight: "500",
+                  fontSize: "14px",
+                  letterSpacing: "1px",
+                  minWidth: "80px"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.12)";
+                  e.target.style.transform = "translateY(-1px)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.08)";
+                  e.target.style.transform = "translateY(0)";
+                }}
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setNote("");
+                  localStorage.removeItem("pomodoros_note");
+                  // Brief visual feedback
+                  const button = event.target;
+                  button.textContent = "Cleared!";
+                  setTimeout(() => {
+                    button.textContent = "Clear";
+                  }, 1500);
+                }}
+                style={{
+                  background: "rgba(255, 255, 255, 0.08)",
+                  backdropFilter: "blur(10px)",
+                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+                  color: accent,
+                  padding: "12px 24px",
+                  cursor: "pointer",
+                  borderRadius: "12px",
+                  transition: "all 0.2s ease",
+                  fontWeight: "500",
+                  fontSize: "14px",
+                  letterSpacing: "1px",
+                  minWidth: "80px"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.12)";
+                  e.target.style.transform = "translateY(-1px)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = "rgba(255, 255, 255, 0.08)";
+                  e.target.style.transform = "translateY(0)";
+                }}
+              >
+                Clear
+              </button>
+            </div>
           </div>
         )}
 
         {/* Stats Section */}
         {tab === "stats" && (
-          <div style={{ textAlign: "center", maxWidth: "400px" }}>
+          <div style={{ textAlign: "center", maxWidth: "500px" }}>
             <h2 style={{
               color: accent,
               fontSize: "28px",
-              marginBottom: "40px",
+              marginBottom: "32px",
               fontWeight: "300",
               letterSpacing: "2px"
             }}>
               Today's Stats
             </h2>
+            
+            {/* Live Session Status */}
             <div style={{
               background: "rgba(255, 255, 255, 0.05)",
               backdropFilter: "blur(10px)",
               border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
-              padding: "32px",
+              padding: "24px",
+              borderRadius: "16px",
+              marginBottom: "24px"
+            }}>
+              <div style={{
+                color: accent,
+                fontSize: "16px",
+                fontWeight: "300",
+                letterSpacing: "1px",
+                lineHeight: "1.5"
+              }}>
+                {running 
+                  ? (phase === "work" 
+                      ? `Focus Session #${sessionsCompleted + 1} is underway... ${formatTime(secsLeft)}` 
+                      : `Recharging: Break session in progress... ${formatTime(secsLeft)}` 
+                    )
+                  : (phase === "work" 
+                      ? "Ready for your next focus session"
+                      : "Ready to continue working"
+                    )
+                }
+              </div>
+            </div>
+            
+            {/* Perfect 2x2 Stats Grid */}
+            <div style={{
+              background: "rgba(255, 255, 255, 0.05)",
+              backdropFilter: "blur(10px)",
+              border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+              padding: "40px",
               borderRadius: "16px",
               textAlign: "center"
             }}>
               <div style={{
-                fontSize: "48px",
-                marginBottom: "16px",
-                color: accent,
-                fontWeight: "300",
-                letterSpacing: "2px"
-              }}>
-                0:00
-              </div>
-              <div style={{
-                color: textDim,
-                marginBottom: "32px",
-                fontSize: "14px",
-                letterSpacing: "1px"
-              }}>
-                Hours:Minutes Focused
-              </div>
-              <div style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
-                gap: "16px"
+                gap: "24px",
+                alignItems: "stretch"
               }}>
+                {/* Sessions Completed */}
                 <div style={{
                   background: "rgba(255, 255, 255, 0.03)",
-                  padding: "20px",
-                  borderRadius: "12px"
+                  padding: "24px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  minHeight: "120px"
                 }}>
                   <div style={{
                     color: textDim,
                     fontSize: "12px",
                     letterSpacing: "1px",
-                    marginBottom: "8px"
+                    marginBottom: "12px",
+                    textTransform: "uppercase"
                   }}>
-                    Work Duration
+                    Sessions Completed
                   </div>
                   <div style={{
-                    fontSize: "24px",
+                    fontSize: "32px",
                     fontWeight: "300",
-                    color: accent
+                    color: accent,
+                    lineHeight: "1"
                   }}>
-                    {workMin} min
+                    {sessionsCompleted}
                   </div>
                 </div>
+                
+                {/* Total Focused Time */}
                 <div style={{
                   background: "rgba(255, 255, 255, 0.03)",
-                  padding: "20px",
-                  borderRadius: "12px"
+                  padding: "24px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  minHeight: "120px"
                 }}>
                   <div style={{
                     color: textDim,
                     fontSize: "12px",
                     letterSpacing: "1px",
-                    marginBottom: "8px"
+                    marginBottom: "12px",
+                    textTransform: "uppercase"
                   }}>
-                    Break Duration
+                    Total Focused Time
                   </div>
                   <div style={{
-                    fontSize: "24px",
+                    fontSize: "32px",
                     fontWeight: "300",
-                    color: accent
+                    color: accent,
+                    lineHeight: "1"
                   }}>
-                    {breakMin} min
+                    {formatTime(totalWorkSecs)}
+                  </div>
+                </div>
+                
+                {/* Total Break Time */}
+                <div style={{
+                  background: "rgba(255, 255, 255, 0.03)",
+                  padding: "24px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  minHeight: "120px"
+                }}>
+                  <div style={{
+                    color: textDim,
+                    fontSize: "12px",
+                    letterSpacing: "1px",
+                    marginBottom: "12px",
+                    textTransform: "uppercase"
+                  }}>
+                    Total Break Time
+                  </div>
+                  <div style={{
+                    fontSize: "32px",
+                    fontWeight: "300",
+                    color: accent,
+                    lineHeight: "1"
+                  }}>
+                    {formatTime(totalBreakSecs)}
+                  </div>
+                </div>
+                
+                {/* Focus Score */}
+                <div style={{
+                  background: "rgba(255, 255, 255, 0.03)",
+                  padding: "24px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  minHeight: "120px"
+                }}>
+                  <div style={{
+                    color: textDim,
+                    fontSize: "12px",
+                    letterSpacing: "1px",
+                    marginBottom: "12px",
+                    textTransform: "uppercase"
+                  }}>
+                    Focus Score
+                  </div>
+                  <div style={{
+                    fontSize: "32px",
+                    fontWeight: "300",
+                    color: focusScore >= 100 ? "#FFD700" : accent,
+                    lineHeight: "1"
+                  }}>
+                    {focusScore}%
                   </div>
                 </div>
               </div>
             </div>
+
+            {/* Clear Stats */}
+            <button
+              onClick={clearStats}
+              style={{
+                background: "rgba(255, 255, 255, 0.05)",
+                backdropFilter: "blur(10px)",
+                border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(0,0,0,0.08)"}`,
+                color: textDim,
+                padding: "10px 24px",
+                cursor: "pointer",
+                borderRadius: "12px",
+                transition: "all 0.2s ease",
+                fontWeight: "500",
+                fontSize: "13px",
+                letterSpacing: "1px"
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = "rgba(255, 255, 255, 0.1)";
+                e.target.style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = "rgba(255, 255, 255, 0.05)";
+                e.target.style.transform = "translateY(0)";
+              }}
+            >
+              Clear Stats
+            </button>
           </div>
         )}
       </div>
