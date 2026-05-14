@@ -1242,6 +1242,13 @@ export default function Pomodoros() {
           </button>
         ))}
       </div>
+      
+      {/* SEO Footer */}
+      <div style={{ position: "absolute", bottom: "8px", left: "50%",
+        transform: "translateX(-50%)", fontSize: "11px", color: "rgba(255,255,255,0.15)",
+        letterSpacing: "0.5px", textAlign: "center", whiteSpace: "nowrap" }}>
+        Minimalist Pomodoro Timer · Ambient Noise · Deep Work Tool
+      </div>
     </div>
   );
 }
