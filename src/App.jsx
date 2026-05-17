@@ -694,33 +694,97 @@ export default function Pomodoros() {
         to { opacity: 1; transform: translateY(0); }
       }
       @media (max-width: 768px) {
+        /* Header */
+        .pomodoros-header {
+          padding: 0 16px !important;
+        }
+        /* Nav bar wraps on small screens */
+        .nav-bar {
+          width: calc(100% - 16px) !important;
+          left: 8px !important;
+          transform: none !important;
+          flex-wrap: wrap !important;
+          justify-content: center !important;
+          gap: 2px !important;
+          padding: 3px !important;
+        }
+        .nav-bar button {
+          padding: 6px 8px !important;
+          font-size: 11px !important;
+          min-width: unset !important;
+        }
+        /* Main content starts lower on mobile */
+        .pomodoros-main {
+          top: 130px !important;
+        }
+        /* Timer and stopwatch grids stack vertically */
         .timer-grid-2, .timer-grid-4 {
           grid-template-columns: 1fr !important;
           grid-template-rows: unset !important;
           height: auto !important;
           overflow-y: auto !important;
+          padding: 8px !important;
+          gap: 8px !important;
         }
-        .nav-bar {
-          gap: 2px !important;
+        .timer-card, .stopwatch-card {
+          max-height: 260px !important;
+          min-height: unset !important;
+          padding: 12px 16px !important;
         }
-        .nav-bar button {
-          padding: 7px 8px !important;
-          font-size: 11px !important;
+        .timer-card .countdown-display {
+          font-size: 40px !important;
         }
+        .stopwatch-card .countdown-display {
+          font-size: 40px !important;
+        }
+        .sw-display {
+          font-size: 40px !important;
+        }
+        /* Stats grid stacks */
         .stats-row {
           grid-template-columns: 1fr 1fr !important;
+          gap: 6px !important;
+        }
+        .stats-grid {
+          padding: 8px !important;
         }
         .task-breakdown-grid {
           grid-template-columns: 1fr !important;
         }
+        /* Noise buttons stack */
+        .noise-buttons {
+          flex-direction: column !important;
+          align-items: center !important;
+        }
+        /* Notes textarea full width */
+        .notes-container {
+          max-width: 100% !important;
+          width: 100% !important;
+          padding: 0 16px !important;
+          box-sizing: border-box !important;
+        }
+        .notes-container h2 {
+          font-size: 20px !important;
+          margin-bottom: 16px !important;
+        }
+        .notes-container textarea {
+          height: 200px !important;
+        }
+        /* Timer countdown smaller on mobile */
+        .countdown-display {
+          font-size: 56px !important;
+        }
       }
       @media (max-width: 480px) {
         .stats-row {
-          grid-template-columns: 1fr !important;
+          grid-template-columns: 1fr 1fr !important;
         }
         .nav-bar button {
-          padding: 6px 6px !important;
+          padding: 5px 8px !important;
           font-size: 10px !important;
+        }
+        .countdown-display {
+          font-size: 44px !important;
         }
       }
       button:focus {
@@ -826,27 +890,7 @@ export default function Pomodoros() {
               z-index: 9999;
               cursor: default;
             }
-            .message {
-              position: fixed;
-              top: 50%;
-              left: 50%;
-              transform: translate(-50%, -50%);
-              color: inherit;
-              font-size: 16px;
-              letter-spacing: 3px;
-              opacity: 0.6;
-              z-index: 10000;
-              text-align: center;
-              font-weight: 300;
-              text-transform: uppercase;
-              user-select: none;
-              pointer-events: none;
-              display: none;
-            }
-            .message.show {
-              display: block;
-            }
-            .title {
+                        .title {
               color: #e8e8e8;
               font-size: 24px;
               font-weight: 300;
@@ -869,7 +913,6 @@ export default function Pomodoros() {
               </div>
             `).join('')}
           </div>
-          <div class="message" id="message">Press ESC to return</div>
           
           <script>
             const WASH_MODES = ${JSON.stringify(WASH_MODES)};
@@ -885,13 +928,12 @@ export default function Pomodoros() {
               
               // Apply fullscreen styling
               card.classList.add('fullscreen');
+              card.addEventListener('click', exitFullscreen, { once: true });
               document.body.style.background = bg;
               
               // Hide other elements
               document.querySelector('.palette-container').style.display = 'none';
               document.querySelector('.title').style.display = 'none';
-              document.getElementById('message').classList.add('show');
-              document.getElementById('message').style.color = text;
               
               // Request fullscreen
               const elem = document.documentElement;
@@ -907,6 +949,10 @@ export default function Pomodoros() {
               }
               
               isFullscreen = true;
+              document.body.addEventListener('click', function onBodyClick() {
+                exitFullscreen();
+                document.body.removeEventListener('click', onBodyClick);
+              });
             }
             
             function exitFullscreen() {
@@ -934,7 +980,6 @@ export default function Pomodoros() {
               // Show all elements again
               document.querySelector('.palette-container').style.display = 'grid';
               document.querySelector('.title').style.display = 'block';
-              document.getElementById('message').classList.remove('show');
               
               // Reset background
               document.body.style.background = '#121212';
@@ -1011,7 +1056,7 @@ export default function Pomodoros() {
       overflow: "hidden"
     }}>
       {/* Header */}
-      <div style={{
+      <div className="pomodoros-header" style={{
         position: "fixed",
         top: 0,
         left: 0,
@@ -1181,7 +1226,7 @@ export default function Pomodoros() {
       </div>
 
       {/* Main Content */}
-      <div style={{
+      <div className="pomodoros-main" style={{
         position: 'fixed',
         top: '108px',
         left: 0,
@@ -1220,6 +1265,7 @@ export default function Pomodoros() {
                 return (
                 <div
                   key={timer.id}
+                  className="timer-card"
                   style={{
                     background: themeMode === 'dark' ? 'rgba(17,17,24,0.8)' : 'rgba(220,216,208,0.9)',
                     backdropFilter: 'blur(20px)',
@@ -1413,7 +1459,7 @@ export default function Pomodoros() {
                     {/* Countdown and Phase */}
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                       {/* Timer Display */}
-                      <div style={{
+                      <div className="countdown-display" style={{
                         fontSize: timers.length === 1 ? '88px' : timers.length === 2 ? '64px' : '48px',
                         fontWeight: "200",
                         color: text,
@@ -1627,7 +1673,7 @@ export default function Pomodoros() {
             }}>
               Ambient Noise
             </h2>
-            <div style={{
+            <div className="noise-buttons" style={{
               display: 'flex',
               gap: '12px',
               justifyContent: 'center',
@@ -1723,7 +1769,7 @@ export default function Pomodoros() {
 
         {/* Note Section */}
         {tab === "note" && (
-          <div style={{ textAlign: "center", maxWidth: "500px", width: "100%" }}>
+          <div className="notes-container" style={{ textAlign: "center", maxWidth: "500px", width: "100%" }}>
             <h2 style={{
               color: accent,
               fontSize: "28px",
@@ -1844,67 +1890,60 @@ export default function Pomodoros() {
 
         {/* Stopwatch Section */}
         {tab === "stopwatch" && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: stopwatches.length === 1 ? '1fr' : '1fr 1fr',
-            gridTemplateRows: stopwatches.length <= 2 ? '1fr' : '1fr 1fr',
-            gap: '10px',
-            padding: '10px 16px',
-            height: 'calc(100vh - 108px)',
-            width: '100%',
-            boxSizing: 'border-box',
-            transition: 'all 0.3s ease',
-            maxWidth: stopwatches.length === 1 ? '520px' : '100%',
-            margin: stopwatches.length === 1 ? '0 auto' : '0'
-          }}>
-            {stopwatches.map(sw => (
-              <div key={sw.id} style={{
-                background: themeMode === 'dark' ? 'rgba(17,17,24,0.8)' : 'rgba(220,216,208,0.9)',
-                backdropFilter: 'blur(20px)',
-                border: `1px solid ${border}`,
-                borderTop: `2px solid ${accentGreen}`,
-                borderRadius: '16px',
-                padding: stopwatches.length <= 2 ? '20px' : '14px',
-                height: '100%',
-                width: '100%',
-                boxSizing: 'border-box',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                position: 'relative',
-                boxShadow: themeMode === 'dark' ? '0 4px 24px rgba(0,0,0,0.4)' : '0 2px 16px rgba(0,0,0,0.06)',
-                transition: 'all 0.3s ease'
-              }}>
-                {/* Delete button */}
-                {stopwatches.length > 1 && (
-                  <button onClick={() => deleteStopwatch(sw.id)} style={{
-                    position: 'absolute', top: '12px', right: '12px',
-                    background: 'transparent', border: 'none',
-                    color: textDim, width: '24px', height: '24px',
-                    borderRadius: '6px', cursor: 'pointer',
-                    fontSize: '14px', display: 'flex',
-                    alignItems: 'center', justifyContent: 'center'
-                  }}>×</button>
-                )}
+          <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
+            <div className={`timer-grid ${stopwatches.length === 2 ? 'timer-grid-2' : 'timer-grid-4'}`} style={{
+              display: 'grid',
+              gridTemplateColumns: stopwatches.length === 1 ? '1fr' : '1fr 1fr',
+              gridTemplateRows: stopwatches.length <= 2 ? '1fr' : '1fr 1fr',
+              gap: '10px',
+              padding: '10px 16px',
+              height: 'calc(100vh - 108px)',
+              boxSizing: 'border-box',
+              width: '100%',
+              maxWidth: stopwatches.length === 1 ? '520px' : '100%',
+              margin: stopwatches.length === 1 ? '0 auto' : '0',
+              transition: 'all 0.3s ease'
+            }}>
+              {stopwatches.map(sw => (
+                <div key={sw.id} className="stopwatch-card" style={{
+                  background: themeMode === 'dark' ? 'rgba(17,17,24,0.8)' : 'rgba(220,216,208,0.9)',
+                  backdropFilter: 'blur(20px)',
+                  border: `1px solid ${border}`,
+                  borderTop: `2px solid ${accentGreen}`,
+                  borderRadius: '16px',
+                  padding: stopwatches.length === 1 ? '28px 32px' : stopwatches.length === 2 ? '20px 24px' : '14px 16px',
+                  textAlign: 'center',
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  boxShadow: themeMode === 'dark' ? '0 4px 24px rgba(0,0,0,0.4)' : '0 2px 16px rgba(0,0,0,0.06)',
+                  transition: 'all 0.3s ease',
+                  overflow: 'hidden',
+                  boxSizing: 'border-box',
+                  height: '100%',
+                  width: '100%'
+                }}>
+                  {/* Delete button */}
+                  {stopwatches.length > 1 && (
+                    <button onClick={() => deleteStopwatch(sw.id)} style={{
+                      position: 'absolute', top: '12px', right: '12px',
+                      background: 'transparent', border: 'none',
+                      color: textDim, width: '24px', height: '24px',
+                      borderRadius: '6px', cursor: 'pointer',
+                      fontSize: '14px', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center'
+                    }}>×</button>
+                  )}
 
-                {/* Stopwatch name */}
-                <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-                  {editingTimerId === sw.id ? (
-                    <input
-                      type="text"
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      onBlur={() => {
-                        if (editingName.trim()) {
-                          setStopwatches(prev => prev.map(s =>
-                            s.id === sw.id ? { ...s, name: editingName.trim() } : s
-                          ));
-                        }
-                        setEditingTimerId(null);
-                        setEditingName('');
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
+                  {/* Stopwatch name */}
+                  <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+                    {editingTimerId === sw.id ? (
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onBlur={() => {
                           if (editingName.trim()) {
                             setStopwatches(prev => prev.map(s =>
                               s.id === sw.id ? { ...s, name: editingName.trim() } : s
@@ -1912,143 +1951,154 @@ export default function Pomodoros() {
                           }
                           setEditingTimerId(null);
                           setEditingName('');
-                        } else if (e.key === 'Escape') {
-                          setEditingTimerId(null);
-                          setEditingName('');
-                        }
-                      }}
-                      autoFocus
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            if (editingName.trim()) {
+                              setStopwatches(prev => prev.map(s =>
+                                s.id === sw.id ? { ...s, name: editingName.trim() } : s
+                              ));
+                            }
+                            setEditingTimerId(null);
+                            setEditingName('');
+                          } else if (e.key === 'Escape') {
+                            setEditingTimerId(null);
+                            setEditingName('');
+                          }
+                        }}
+                        autoFocus
+                        style={{
+                          background: surface,
+                          border: `1px solid ${accent}`,
+                          borderRadius: '6px',
+                          color: text,
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          padding: '4px 10px',
+                          textAlign: 'center',
+                          outline: 'none',
+                          width: '80%'
+                        }}
+                      />
+                    ) : (
+                      <div
+                        onClick={() => { setEditingTimerId(sw.id); setEditingName(sw.name); }}
+                        style={{
+                          color: textDim,
+                          fontSize: stopwatches.length === 1 ? '13px' : '10px',
+                          fontWeight: '500',
+                          cursor: 'pointer',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          letterSpacing: '0.8px',
+                          textTransform: 'uppercase',
+                          userSelect: 'none',
+                          transition: 'all 0.15s ease',
+                          display: 'inline-block'
+                        }}
+                        onMouseEnter={(e) => e.target.style.background = surfaceHover}
+                        onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                      >
+                        {sw.name}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Elapsed time display */}
+                  <div style={{
+                    flex: 1, display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', gap: '4px'
+                  }}>
+                    <div className="sw-display" style={{
+                      fontSize: stopwatches.length === 1 ? '88px' : stopwatches.length === 2 ? '64px' : '48px',
+                      fontWeight: '200', color: text, letterSpacing: '-1px',
+                      fontVariantNumeric: 'tabular-nums', lineHeight: '1',
+                      userSelect: 'none', pointerEvents: 'none'
+                    }}>
+                      {formatStopwatchTime(sw.elapsed)}
+                    </div>
+                    <div style={{
+                      color: accentGreen, fontSize: '10px', fontWeight: '500',
+                      letterSpacing: '2px', textTransform: 'uppercase'
+                    }}>
+                      {sw.running ? 'COUNTING' : sw.elapsed > 0 ? 'PAUSED' : 'READY'}
+                    </div>
+
+                    {/* Laps display — show last 3 laps */}
+                    {sw.laps.length > 0 && (
+                      <div style={{
+                        marginTop: '8px', width: '100%', maxWidth: '280px'
+                      }}>
+                        {sw.laps.slice(-3).map(lap => (
+                          <div key={lap.number} style={{
+                            display: 'flex', justifyContent: 'space-between',
+                            fontSize: '10px', color: textDim,
+                            padding: '2px 8px',
+                            borderBottom: `1px solid ${border}` 
+                          }}>
+                            <span>Lap {lap.number}</span>
+                            <span>{formatStopwatchTime(lap.split)}</span>
+                            <span style={{ opacity: 0.6 }}>{formatStopwatchTime(lap.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Controls */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {/* Start/Pause + Lap */}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => sw.running ? pauseStopwatch(sw.id) : startStopwatch(sw.id)}
+                        style={{
+                          background: sw.running ? 'rgba(224,123,79,0.15)' : accentBlue,
+                          border: sw.running ? '1px solid rgba(224,123,79,0.3)' : 'none',
+                          color: sw.running ? accentBlue : 'white',
+                          padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
+                          borderRadius: '10px', cursor: 'pointer',
+                          fontWeight: '500',
+                          fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
+                          flex: 1, transition: 'all 0.15s ease'
+                        }}>
+                        {sw.running ? 'Pause' : 'Start'}
+                      </button>
+                      <button
+                        onClick={() => lapStopwatch(sw.id)}
+                        disabled={!sw.running}
+                        style={{
+                          background: 'transparent',
+                          border: `1px solid ${border}`,
+                          color: sw.running ? text : textDim,
+                          padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
+                          borderRadius: '10px', cursor: sw.running ? 'pointer' : 'not-allowed',
+                          fontWeight: '500',
+                          fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
+                          flex: 1, transition: 'all 0.15s ease',
+                          opacity: sw.running ? 1 : 0.4
+                        }}>
+                        Lap
+                      </button>
+                    </div>
+                    {/* Reset */}
+                    <button
+                      onClick={() => resetStopwatch(sw.id)}
                       style={{
                         background: surface,
-                        border: `1px solid ${accent}`,
-                        borderRadius: '6px',
-                        color: text,
-                        fontSize: '11px',
-                        fontWeight: '500',
-                        padding: '4px 10px',
-                        textAlign: 'center',
-                        outline: 'none',
-                        width: '80%'
-                      }}
-                    />
-                  ) : (
-                    <div
-                      onClick={() => { setEditingTimerId(sw.id); setEditingName(sw.name); }}
-                      style={{
+                        border: `1px solid ${border}`,
                         color: textDim,
-                        fontSize: stopwatches.length === 1 ? '13px' : '10px',
-                        fontWeight: '500',
-                        cursor: 'pointer',
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        letterSpacing: '0.8px',
-                        textTransform: 'uppercase',
-                        userSelect: 'none',
-                        transition: 'all 0.15s ease',
-                        display: 'inline-block'
-                      }}
-                      onMouseEnter={(e) => e.target.style.background = surfaceHover}
-                      onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                    >
-                      {sw.name}
-                    </div>
-                  )}
-                </div>
-
-                {/* Elapsed time display */}
-                <div style={{
-                  flex: 1, display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', justifyContent: 'center', gap: '4px'
-                }}>
-                  <div style={{
-                    fontSize: stopwatches.length === 1 ? '88px' : stopwatches.length === 2 ? '64px' : '48px',
-                    fontWeight: '200', color: text, letterSpacing: '-1px',
-                    fontVariantNumeric: 'tabular-nums', lineHeight: '1',
-                    userSelect: 'none', pointerEvents: 'none'
-                  }}>
-                    {formatStopwatchTime(sw.elapsed)}
-                  </div>
-                  <div style={{
-                    color: accentGreen, fontSize: '10px', fontWeight: '500',
-                    letterSpacing: '2px', textTransform: 'uppercase'
-                  }}>
-                    {sw.running ? 'COUNTING' : sw.elapsed > 0 ? 'PAUSED' : 'READY'}
-                  </div>
-
-                  {/* Laps display — show last 3 laps */}
-                  {sw.laps.length > 0 && (
-                    <div style={{
-                      marginTop: '8px', width: '100%', maxWidth: '280px'
-                    }}>
-                      {sw.laps.slice(-3).map(lap => (
-                        <div key={lap.number} style={{
-                          display: 'flex', justifyContent: 'space-between',
-                          fontSize: '10px', color: textDim,
-                          padding: '2px 8px',
-                          borderBottom: `1px solid ${border}` 
-                        }}>
-                          <span>Lap {lap.number}</span>
-                          <span>{formatStopwatchTime(lap.split)}</span>
-                          <span style={{ opacity: 0.6 }}>{formatStopwatchTime(lap.total)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Controls */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {/* Start/Pause + Lap */}
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={() => sw.running ? pauseStopwatch(sw.id) : startStopwatch(sw.id)}
-                      style={{
-                        background: sw.running ? 'rgba(224,123,79,0.15)' : accentBlue,
-                        border: sw.running ? '1px solid rgba(224,123,79,0.3)' : 'none',
-                        color: sw.running ? accentBlue : 'white',
                         padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
                         borderRadius: '10px', cursor: 'pointer',
                         fontWeight: '500',
                         fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
-                        flex: 1, transition: 'all 0.15s ease'
+                        width: '100%', transition: 'all 0.15s ease'
                       }}>
-                      {sw.running ? 'Pause' : 'Start'}
-                    </button>
-                    <button
-                      onClick={() => lapStopwatch(sw.id)}
-                      disabled={!sw.running}
-                      style={{
-                        background: 'transparent',
-                        border: `1px solid ${border}`,
-                        color: sw.running ? text : textDim,
-                        padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
-                        borderRadius: '10px', cursor: sw.running ? 'pointer' : 'not-allowed',
-                        fontWeight: '500',
-                        fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
-                        flex: 1, transition: 'all 0.15s ease',
-                        opacity: sw.running ? 1 : 0.4
-                      }}>
-                      Lap
+                      Reset
                     </button>
                   </div>
-                  {/* Reset */}
-                  <button
-                    onClick={() => resetStopwatch(sw.id)}
-                    style={{
-                      background: surface,
-                      border: `1px solid ${border}`,
-                      color: textDim,
-                      padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
-                      borderRadius: '10px', cursor: 'pointer',
-                      fontWeight: '500',
-                      fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
-                      width: '100%', transition: 'all 0.15s ease'
-                    }}>
-                    Reset
-                  </button>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
 
