@@ -2,6 +2,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Monitor, Sun, Moon, Volume2, VolumeX, FileText, BarChart2 } from "lucide-react";
 
 export default function Pomodoros() {
+  // Pomodoro Presets
+  const PRESETS = [
+    { label: '25/5', work: 25, break: 5 },
+    { label: '30/10', work: 30, break: 10 },
+    { label: '45/15', work: 45, break: 15 },
+  ];
+
   // State
   const [tab, setTab] = useState("timer");
   const [workMin, setWorkMin] = useState(25);
@@ -41,13 +48,22 @@ export default function Pomodoros() {
       cyclesCompleted: 0,
       totalWorkSeconds: 0,
       totalBreakSeconds: 0,
-      liveSeconds: 0
+      liveSeconds: 0,
+      workMin: 25,
+      breakMin: 5,
+      selectedPreset: '25/5'
     }
   ]);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newTimerName, setNewTimerName] = useState('');
   const [editingTimerId, setEditingTimerId] = useState(null);
   const [editingName, setEditingName] = useState('');
+  
+  // Stopwatch state
+  const [stopwatches, setStopwatches] = useState([
+    { id: 1, name: 'Task 1', elapsed: 0, running: false, laps: [] }
+  ]);
+  const stopwatchIntervalsRef = useRef({});
 
   // Refs
   const timerRef = useRef(null);
@@ -277,6 +293,13 @@ export default function Pomodoros() {
       totalBreakSeconds: 0,
       cyclesCompleted: 0
     })));
+    // Clear stopwatch stats
+    setStopwatches(prev => prev.map(sw => ({
+      ...sw,
+      elapsed: 0,
+      running: false,
+      laps: []
+    })));
   }, []);
 
   // ─── Export CSV ─────────────────────────────────────────────────────────────
@@ -291,7 +314,17 @@ export default function Pomodoros() {
         new Date().toLocaleDateString()
       ]),
       ['', '', '', '', ''],
-      ['TOTALS', formatTime(totalWorkSecs), formatTime(totalBreakSecs), totalCycles, '']
+      ['TOTALS', formatTime(totalWorkSecs), formatTime(totalBreakSecs), totalCycles, ''],
+      ['', '', '', '', ''],
+      ['STOPWATCH SESSIONS', '', '', '', ''],
+      ['Stopwatch Name', 'Elapsed Time', 'Laps', '', 'Date'],
+      ...stopwatches.filter(sw => sw.elapsed > 0).map(sw => [
+        sw.name,
+        formatStopwatchTime(sw.elapsed),
+        sw.laps.length,
+        '',
+        new Date().toLocaleDateString()
+      ])
     ];
     const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -334,7 +367,10 @@ export default function Pomodoros() {
         cyclesCompleted: 0,
         totalWorkSeconds: 0,
         totalBreakSeconds: 0,
-        liveSeconds: 0
+        liveSeconds: 0,
+        workMin: 25,
+        breakMin: 5,
+        selectedPreset: '25/5'
       };
       
       return [...prev, newTimer];
@@ -401,7 +437,7 @@ export default function Pomodoros() {
         ...t, 
         running: false, 
         phase: 'work', 
-        secsLeft: 25 * 60,
+        secsLeft: t.workMin * 60,
         liveSeconds: 0
       } : t
     ));
@@ -422,7 +458,7 @@ export default function Pomodoros() {
           ...t, 
           running: false, 
           phase: newPhase,
-          secsLeft: newPhase === 'work' ? 25 * 60 : 5 * 60,
+          secsLeft: newPhase === 'work' ? t.workMin * 60 : t.breakMin * 60,
           liveSeconds: 0
         };
         if (t.phase === 'work') {
@@ -470,10 +506,87 @@ export default function Pomodoros() {
     setEditingName('');
   }, [editingName, updateTimer]);
 
+  // Stopwatch functions
+  const startStopwatch = useCallback((id) => {
+    if (stopwatchIntervalsRef.current[id]) return;
+    const startTime = Date.now();
+    setStopwatches(prev => {
+      const sw = prev.find(s => s.id === id);
+      const offset = sw ? sw.elapsed : 0;
+      stopwatchIntervalsRef.current[id] = setInterval(() => {
+        setStopwatches(p => p.map(s => s.id === id
+          ? { ...s, elapsed: offset + Math.floor((Date.now() - startTime) / 1000) }
+          : s
+        ));
+      }, 1000);
+      return prev.map(s => s.id === id ? { ...s, running: true } : s);
+    });
+  }, []);
+
+  const pauseStopwatch = useCallback((id) => {
+    clearInterval(stopwatchIntervalsRef.current[id]);
+    delete stopwatchIntervalsRef.current[id];
+    setStopwatches(prev => prev.map(s => s.id === id ? { ...s, running: false } : s));
+  }, []);
+
+  const resetStopwatch = useCallback((id) => {
+    clearInterval(stopwatchIntervalsRef.current[id]);
+    delete stopwatchIntervalsRef.current[id];
+    setStopwatches(prev => prev.map(s =>
+      s.id === id ? { ...s, elapsed: 0, running: false, laps: [] } : s
+    ));
+  }, []);
+
+  const lapStopwatch = useCallback((id) => {
+    setStopwatches(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const lapTime = s.elapsed;
+      const prevLap = s.laps.length > 0 ? s.laps[s.laps.length - 1].total : 0;
+      return {
+        ...s,
+        laps: [...s.laps, {
+          number: s.laps.length + 1,
+          split: lapTime - prevLap,
+          total: lapTime
+        }]
+      };
+    }));
+  }, []);
+
+  const deleteStopwatch = useCallback((id) => {
+    clearInterval(stopwatchIntervalsRef.current[id]);
+    delete stopwatchIntervalsRef.current[id];
+    setStopwatches(prev => prev.filter(s => s.id !== id));
+  }, []);
+
+  const addStopwatch = useCallback(() => {
+    setStopwatches(prev => {
+      if (prev.length >= 4) return prev;
+      const newNumber = prev.length + 1;
+      return [...prev, {
+        id: Date.now(),
+        name: `Task ${newNumber}`,
+        elapsed: 0,
+        running: false,
+        laps: []
+      }];
+    });
+  }, []);
+
+  // Format stopwatch time as HH:MM:SS
+  const formatStopwatchTime = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+    return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  };
+
   // Clean up intervals on unmount
   useEffect(() => {
     return () => {
       Object.values(timerIntervalsRef.current).forEach(interval => clearInterval(interval));
+      Object.values(stopwatchIntervalsRef.current).forEach(interval => clearInterval(interval));
     };
   }, []);
 
@@ -998,7 +1111,7 @@ export default function Pomodoros() {
         gap: "3px",
         alignItems: "center"
       }}>
-        {["timer", "noise", "note", "stats"].map(t => (
+        {["timer", "noise", "note", "stopwatch", "stats"].map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -1026,43 +1139,43 @@ export default function Pomodoros() {
               }
             }}
           >
-            {t}
+            {t === 'stopwatch' ? 'Watch' : t}
           </button>
         ))}
         
-        {/* Add Timer Button */}
-        {tab === "timer" && (
+        {/* Add Timer/Stopwatch Button */}
+        {(tab === "timer" || tab === "stopwatch") && (
           <button
-            onClick={addTimer}
-            disabled={timers.length >= 4}
+            onClick={tab === "timer" ? addTimer : addStopwatch}
+            disabled={tab === "timer" ? timers.length >= 4 : stopwatches.length >= 4}
             style={{
-              background: timers.length >= 4 ? surface : "rgba(91,110,245,0.15)",
-              color: timers.length >= 4 ? textDim : accentBlue,
-              border: `1px solid ${timers.length >= 4 ? border : 'rgba(91,110,245,0.3)'}`,
+              background: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? surface : "rgba(91,110,245,0.15)",
+              color: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? textDim : accentBlue,
+              border: `1px solid ${(tab === "timer" ? timers.length : stopwatches.length) >= 4 ? border : 'rgba(91,110,245,0.3)'}`,
               padding: "8px 16px",
-              cursor: timers.length >= 4 ? "not-allowed" : "pointer",
+              cursor: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? "not-allowed" : "pointer",
               borderRadius: "9px",
               transition: "all 0.15s ease",
               fontWeight: "500",
               fontSize: "13px",
               letterSpacing: "0.5px",
-              opacity: timers.length >= 4 ? 0.5 : 1,
+              opacity: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? 0.5 : 1,
               marginLeft: "8px"
             }}
             onMouseEnter={(e) => {
-              if (timers.length < 4) {
+              if ((tab === "timer" ? timers.length : stopwatches.length) < 4) {
                 e.target.style.borderColor = borderHover;
                 e.target.style.transform = "translateY(-1px)";
               }
             }}
             onMouseLeave={(e) => {
-              if (timers.length < 4) {
+              if ((tab === "timer" ? timers.length : stopwatches.length) < 4) {
                 e.target.style.borderColor = 'rgba(91,110,245,0.3)';
                 e.target.style.transform = "translateY(0)";
               }
             }}
           >
-            + Add {timers.length >= 4 && "(Max 4)"}
+            + Add {(tab === "timer" ? timers.length : stopwatches.length) >= 4 && "(Max 4)"}
           </button>
         )}
       </div>
@@ -1078,7 +1191,7 @@ export default function Pomodoros() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: tab === 'timer' ? 'flex-start' : 'center',
+        justifyContent: (tab === 'timer' || tab === 'stopwatch') ? 'flex-start' : 'center',
         height: '100%',
         width: '100%'
       }}>
@@ -1170,7 +1283,7 @@ export default function Pomodoros() {
                         onChange={(e) => setEditingName(e.target.value)}
                         onBlur={() => {
                           if (editingName.trim()) {
-                            updateTimerName(timer.id, editingName.trim());
+                            updateTimer(timer.id, { name: editingName.trim() });
                           }
                           setEditingTimerId(null);
                           setEditingName('');
@@ -1178,7 +1291,7 @@ export default function Pomodoros() {
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             if (editingName.trim()) {
-                              updateTimerName(timer.id, editingName.trim());
+                              updateTimer(timer.id, { name: editingName.trim() });
                             }
                             setEditingTimerId(null);
                             setEditingName('');
@@ -1231,47 +1344,140 @@ export default function Pomodoros() {
                     )}
                   </div>
 
+                  {/* Preset Buttons */}
+                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginBottom: '4px' }}>
+                    {PRESETS.map(preset => (
+                      <button
+                        key={preset.label}
+                        onClick={() => {
+                          if (!timer.running) {
+                            setTimers(prev => prev.map(t => t.id === timer.id ? {
+                              ...t,
+                              selectedPreset: preset.label,
+                              secsLeft: timer.phase === 'work' ? preset.work * 60 : preset.break * 60,
+                              workMin: preset.work,
+                              breakMin: preset.break
+                            } : t));
+                          }
+                        }}
+                        style={{
+                          background: timer.selectedPreset === preset.label
+                            ? 'rgba(224,123,79,0.2)'
+                            : 'transparent',
+                          border: `1px solid ${timer.selectedPreset === preset.label
+                            ? 'rgba(224,123,79,0.5)'
+                            : border}`,
+                          color: timer.selectedPreset === preset.label ? accentBlue : textDim,
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '10px',
+                          fontWeight: '500',
+                          cursor: timer.running ? 'not-allowed' : 'pointer',
+                          opacity: timer.running ? 0.5 : 1,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* Countdown + Phase Label Container */}
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px', margin: '0' }}>
-                    {/* Timer Display */}
-                    <div style={{
-                      fontSize: timers.length === 1 ? '88px' : timers.length === 2 ? '64px' : '48px',
-                      fontWeight: "200",
-                      color: text,
-                      letterSpacing: "-1px",
-                      fontVariantNumeric: "tabular-nums",
-                      margin: '0',
-                      lineHeight: '1',
-                      cursor: 'default',
-                      userSelect: 'none',
-                      WebkitUserSelect: 'none',
-                      MozUserSelect: 'none',
-                      msUserSelect: 'none',
-                      caretColor: 'transparent',
-                      pointerEvents: 'none'
-                    }}>
-                      {formatTime(timer.secsLeft)}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flex: 1 }}>
+                    {/* Minus Button */}
+                    <button
+                      onClick={() => {
+                        if (!timer.running) {
+                          setTimers(prev => prev.map(t => t.id === timer.id
+                            ? { ...t, secsLeft: Math.max(60, t.secsLeft - 60) }
+                            : t
+                          ));
+                        }
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${border}`,
+                        color: textDim,
+                        width: '28px', height: '28px',
+                        borderRadius: '8px',
+                        cursor: timer.running ? 'not-allowed' : 'pointer',
+                        fontSize: '16px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        opacity: timer.running ? 0.3 : 1,
+                        transition: 'all 0.15s ease',
+                        flexShrink: 0
+                      }}>
+                      −
+                    </button>
+
+                    {/* Countdown and Phase */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                      {/* Timer Display */}
+                      <div style={{
+                        fontSize: timers.length === 1 ? '88px' : timers.length === 2 ? '64px' : '48px',
+                        fontWeight: "200",
+                        color: text,
+                        letterSpacing: "-1px",
+                        fontVariantNumeric: "tabular-nums",
+                        margin: '0',
+                        lineHeight: '1',
+                        cursor: 'default',
+                        userSelect: 'none',
+                        WebkitUserSelect: 'none',
+                        MozUserSelect: 'none',
+                        msUserSelect: 'none',
+                        caretColor: 'transparent',
+                        pointerEvents: 'none'
+                      }}>
+                        {formatTime(timer.secsLeft)}
+                      </div>
+
+                      {/* Phase */}
+                      <div style={{
+                        color: timer.phase === "work" ? accentGreen : accentBlue,
+                        fontSize: timers.length === 1 ? '12px' : '9px',
+                        fontWeight: "500",
+                        letterSpacing: "0.8px",
+                        textTransform: "uppercase",
+                        margin: '0',
+                        padding: '0',
+                        cursor: 'default',
+                        userSelect: 'none',
+                        WebkitUserSelect: 'none',
+                        MozUserSelect: 'none',
+                        msUserSelect: 'none',
+                        caretColor: 'transparent',
+                        pointerEvents: 'none'
+                      }}>
+                        {timer.phase === "work" ? "Focus" : "Rest"}
+                      </div>
                     </div>
 
-                    {/* Phase */}
-                    <div style={{
-                      color: timer.phase === "work" ? accentGreen : accentBlue,
-                      fontSize: timers.length === 1 ? '12px' : '9px',
-                      fontWeight: "500",
-                      letterSpacing: "0.8px",
-                      textTransform: "uppercase",
-                      margin: '0',
-                      padding: '0',
-                      cursor: 'default',
-                      userSelect: 'none',
-                      WebkitUserSelect: 'none',
-                      MozUserSelect: 'none',
-                      msUserSelect: 'none',
-                      caretColor: 'transparent',
-                      pointerEvents: 'none'
-                    }}>
-                      {timer.phase === "work" ? "Focus" : "Rest"}
-                    </div>
+                    {/* Plus Button */}
+                    <button
+                      onClick={() => {
+                        if (!timer.running) {
+                          setTimers(prev => prev.map(t => t.id === timer.id
+                            ? { ...t, secsLeft: Math.min(3600, t.secsLeft + 60) }
+                            : t
+                          ));
+                        }
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${border}`,
+                        color: textDim,
+                        width: '28px', height: '28px',
+                        borderRadius: '8px',
+                        cursor: timer.running ? 'not-allowed' : 'pointer',
+                        fontSize: '16px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        opacity: timer.running ? 0.3 : 1,
+                        transition: 'all 0.15s ease',
+                        flexShrink: 0
+                      }}>
+                      +
+                    </button>
                   </div>
 
                   {/* Controls */}
@@ -1636,9 +1842,227 @@ export default function Pomodoros() {
           </div>
         )}
 
+        {/* Stopwatch Section */}
+        {tab === "stopwatch" && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: stopwatches.length === 1 ? '1fr' : '1fr 1fr',
+            gridTemplateRows: stopwatches.length <= 2 ? '1fr' : '1fr 1fr',
+            gap: '10px',
+            padding: '10px 16px',
+            height: 'calc(100vh - 108px)',
+            width: '100%',
+            boxSizing: 'border-box',
+            transition: 'all 0.3s ease',
+            maxWidth: stopwatches.length === 1 ? '520px' : '100%',
+            margin: stopwatches.length === 1 ? '0 auto' : '0'
+          }}>
+            {stopwatches.map(sw => (
+              <div key={sw.id} style={{
+                background: themeMode === 'dark' ? 'rgba(17,17,24,0.8)' : 'rgba(220,216,208,0.9)',
+                backdropFilter: 'blur(20px)',
+                border: `1px solid ${border}`,
+                borderTop: `2px solid ${accentGreen}`,
+                borderRadius: '16px',
+                padding: stopwatches.length <= 2 ? '20px' : '14px',
+                height: '100%',
+                width: '100%',
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                position: 'relative',
+                boxShadow: themeMode === 'dark' ? '0 4px 24px rgba(0,0,0,0.4)' : '0 2px 16px rgba(0,0,0,0.06)',
+                transition: 'all 0.3s ease'
+              }}>
+                {/* Delete button */}
+                {stopwatches.length > 1 && (
+                  <button onClick={() => deleteStopwatch(sw.id)} style={{
+                    position: 'absolute', top: '12px', right: '12px',
+                    background: 'transparent', border: 'none',
+                    color: textDim, width: '24px', height: '24px',
+                    borderRadius: '6px', cursor: 'pointer',
+                    fontSize: '14px', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center'
+                  }}>×</button>
+                )}
+
+                {/* Stopwatch name */}
+                <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+                  {editingTimerId === sw.id ? (
+                    <input
+                      type="text"
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onBlur={() => {
+                        if (editingName.trim()) {
+                          setStopwatches(prev => prev.map(s =>
+                            s.id === sw.id ? { ...s, name: editingName.trim() } : s
+                          ));
+                        }
+                        setEditingTimerId(null);
+                        setEditingName('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (editingName.trim()) {
+                            setStopwatches(prev => prev.map(s =>
+                              s.id === sw.id ? { ...s, name: editingName.trim() } : s
+                            ));
+                          }
+                          setEditingTimerId(null);
+                          setEditingName('');
+                        } else if (e.key === 'Escape') {
+                          setEditingTimerId(null);
+                          setEditingName('');
+                        }
+                      }}
+                      autoFocus
+                      style={{
+                        background: surface,
+                        border: `1px solid ${accent}`,
+                        borderRadius: '6px',
+                        color: text,
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        padding: '4px 10px',
+                        textAlign: 'center',
+                        outline: 'none',
+                        width: '80%'
+                      }}
+                    />
+                  ) : (
+                    <div
+                      onClick={() => { setEditingTimerId(sw.id); setEditingName(sw.name); }}
+                      style={{
+                        color: textDim,
+                        fontSize: stopwatches.length === 1 ? '13px' : '10px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        letterSpacing: '0.8px',
+                        textTransform: 'uppercase',
+                        userSelect: 'none',
+                        transition: 'all 0.15s ease',
+                        display: 'inline-block'
+                      }}
+                      onMouseEnter={(e) => e.target.style.background = surfaceHover}
+                      onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                    >
+                      {sw.name}
+                    </div>
+                  )}
+                </div>
+
+                {/* Elapsed time display */}
+                <div style={{
+                  flex: 1, display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center', gap: '4px'
+                }}>
+                  <div style={{
+                    fontSize: stopwatches.length === 1 ? '88px' : stopwatches.length === 2 ? '64px' : '48px',
+                    fontWeight: '200', color: text, letterSpacing: '-1px',
+                    fontVariantNumeric: 'tabular-nums', lineHeight: '1',
+                    userSelect: 'none', pointerEvents: 'none'
+                  }}>
+                    {formatStopwatchTime(sw.elapsed)}
+                  </div>
+                  <div style={{
+                    color: accentGreen, fontSize: '10px', fontWeight: '500',
+                    letterSpacing: '2px', textTransform: 'uppercase'
+                  }}>
+                    {sw.running ? 'COUNTING' : sw.elapsed > 0 ? 'PAUSED' : 'READY'}
+                  </div>
+
+                  {/* Laps display — show last 3 laps */}
+                  {sw.laps.length > 0 && (
+                    <div style={{
+                      marginTop: '8px', width: '100%', maxWidth: '280px'
+                    }}>
+                      {sw.laps.slice(-3).map(lap => (
+                        <div key={lap.number} style={{
+                          display: 'flex', justifyContent: 'space-between',
+                          fontSize: '10px', color: textDim,
+                          padding: '2px 8px',
+                          borderBottom: `1px solid ${border}` 
+                        }}>
+                          <span>Lap {lap.number}</span>
+                          <span>{formatStopwatchTime(lap.split)}</span>
+                          <span style={{ opacity: 0.6 }}>{formatStopwatchTime(lap.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Controls */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {/* Start/Pause + Lap */}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => sw.running ? pauseStopwatch(sw.id) : startStopwatch(sw.id)}
+                      style={{
+                        background: sw.running ? 'rgba(224,123,79,0.15)' : accentBlue,
+                        border: sw.running ? '1px solid rgba(224,123,79,0.3)' : 'none',
+                        color: sw.running ? accentBlue : 'white',
+                        padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
+                        borderRadius: '10px', cursor: 'pointer',
+                        fontWeight: '500',
+                        fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
+                        flex: 1, transition: 'all 0.15s ease'
+                      }}>
+                      {sw.running ? 'Pause' : 'Start'}
+                    </button>
+                    <button
+                      onClick={() => lapStopwatch(sw.id)}
+                      disabled={!sw.running}
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${border}`,
+                        color: sw.running ? text : textDim,
+                        padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
+                        borderRadius: '10px', cursor: sw.running ? 'pointer' : 'not-allowed',
+                        fontWeight: '500',
+                        fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
+                        flex: 1, transition: 'all 0.15s ease',
+                        opacity: sw.running ? 1 : 0.4
+                      }}>
+                      Lap
+                    </button>
+                  </div>
+                  {/* Reset */}
+                  <button
+                    onClick={() => resetStopwatch(sw.id)}
+                    style={{
+                      background: surface,
+                      border: `1px solid ${border}`,
+                      color: textDim,
+                      padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
+                      borderRadius: '10px', cursor: 'pointer',
+                      fontWeight: '500',
+                      fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
+                      width: '100%', transition: 'all 0.15s ease'
+                    }}>
+                    Reset
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Stats Section */}
         {tab === "stats" && (
-          <div style={{ textAlign: "center", maxWidth: "680px", margin: "0 auto" }}>
+          <div style={{
+              textAlign: 'center',
+              maxWidth: '680px',
+              margin: '0 auto',
+              width: '100%',
+              height: '100%',
+              overflowY: 'auto',
+              paddingBottom: '20px'
+            }}>
             <h2 style={{
               color: textDim,
               fontSize: "13px",
@@ -1655,7 +2079,7 @@ export default function Pomodoros() {
             <div className="stats-grid stats-row" style={{
               background: surface,
               border: `1px solid ${border}`,
-              padding: "16px",
+              padding: "12px",
               borderRadius: "16px",
               textAlign: "center"
             }}>
@@ -1668,7 +2092,7 @@ export default function Pomodoros() {
                 {/* Total Focus Time */}
                 <div style={{
                   background: surface,
-                  padding: "16px 20px",
+                  padding: "12px 20px",
                   borderRadius: "16px",
                   display: "flex",
                   flexDirection: "column",
@@ -1677,7 +2101,7 @@ export default function Pomodoros() {
                 }}>
                   <div style={{
                     color: textDim,
-                    fontSize: "11px",
+                    fontSize: "10px",
                     letterSpacing: "0.8px",
                     marginBottom: "8px",
                     textTransform: "uppercase",
@@ -1686,7 +2110,7 @@ export default function Pomodoros() {
                     Total Focus Time
                   </div>
                   <div style={{
-                    fontSize: "26px",
+                    fontSize: "22px",
                     fontWeight: "300",
                     color: text,
                     lineHeight: "1"
@@ -1698,7 +2122,7 @@ export default function Pomodoros() {
                 {/* Total Break Time */}
                 <div style={{
                   background: surface,
-                  padding: "16px 20px",
+                  padding: "12px 20px",
                   borderRadius: "16px",
                   display: "flex",
                   flexDirection: "column",
@@ -1707,7 +2131,7 @@ export default function Pomodoros() {
                 }}>
                   <div style={{
                     color: textDim,
-                    fontSize: "11px",
+                    fontSize: "10px",
                     letterSpacing: "0.8px",
                     marginBottom: "8px",
                     textTransform: "uppercase",
@@ -1716,7 +2140,7 @@ export default function Pomodoros() {
                     Total Break Time
                   </div>
                   <div style={{
-                    fontSize: "26px",
+                    fontSize: "22px",
                     fontWeight: "300",
                     color: text,
                     lineHeight: "1"
@@ -1728,7 +2152,7 @@ export default function Pomodoros() {
                 {/* Total Cycles Completed */}
                 <div style={{
                   background: surface,
-                  padding: "16px 20px",
+                  padding: "12px 20px",
                   borderRadius: "16px",
                   display: "flex",
                   flexDirection: "column",
@@ -1737,7 +2161,7 @@ export default function Pomodoros() {
                 }}>
                   <div style={{
                     color: textDim,
-                    fontSize: "11px",
+                    fontSize: "10px",
                     letterSpacing: "0.8px",
                     marginBottom: "8px",
                     textTransform: "uppercase",
@@ -1746,7 +2170,7 @@ export default function Pomodoros() {
                     Total Cycles Completed
                   </div>
                   <div style={{
-                    fontSize: "26px",
+                    fontSize: "22px",
                     fontWeight: "300",
                     color: text,
                     lineHeight: "1"
@@ -1758,7 +2182,7 @@ export default function Pomodoros() {
                 {/* Focus Score */}
                 <div style={{
                   background: surface,
-                  padding: "16px 20px",
+                  padding: "12px 20px",
                   borderRadius: "16px",
                   display: "flex",
                   flexDirection: "column",
@@ -1767,7 +2191,7 @@ export default function Pomodoros() {
                 }}>
                   <div style={{
                     color: textDim,
-                    fontSize: "11px",
+                    fontSize: "10px",
                     letterSpacing: "0.8px",
                     marginBottom: "8px",
                     textTransform: "uppercase",
@@ -1776,7 +2200,7 @@ export default function Pomodoros() {
                     Focus Score
                   </div>
                   <div style={{
-                    fontSize: "26px",
+                    fontSize: "22px",
                     fontWeight: "300",
                     color: focusScore === 100 ? "#FFD700" : text,
                     lineHeight: "1"
@@ -1792,7 +2216,7 @@ export default function Pomodoros() {
               display: 'flex',
               gap: '8px',
               justifyContent: 'center',
-              marginTop: '12px',
+              marginTop: '8px',
               flexWrap: 'wrap'
             }}>
               <button
@@ -1883,7 +2307,7 @@ export default function Pomodoros() {
                 display: 'grid',
                 gridTemplateColumns: timers.length > 2 ? '1fr 1fr' : '1fr',
                 gap: '8px',
-                marginTop: '12px'
+                marginTop: '8px'
               }}>
                 {timers.map((timer) => (
                   <div key={timer.id} style={{
@@ -1978,10 +2402,53 @@ export default function Pomodoros() {
                 ))}
               </div>
             )}
+
+            {/* Stopwatch Sessions */}
+            {stopwatches.some(sw => sw.elapsed > 0) && (
+              <div style={{ marginTop: '8px' }}>
+                <div style={{
+                  color: textDim, fontSize: '11px', letterSpacing: '1.5px',
+                  textTransform: 'uppercase', fontWeight: '500',
+                  marginBottom: '8px', textAlign: 'center'
+                }}>Stopwatch Sessions</div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: stopwatches.length > 2 ? '1fr 1fr' : '1fr',
+                  gap: '8px'
+                }}>
+                  {stopwatches.filter(sw => sw.elapsed > 0).map(sw => (
+                    <div key={sw.id} style={{
+                      background: themeMode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(40,35,29,0.05)',
+                      border: `1px solid ${border}`,
+                      borderLeft: `3px solid ${accentGreen}`,
+                      padding: '12px', borderRadius: '12px',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                    }}>
+                      <div style={{ color: accent, fontSize: '13px', fontWeight: '500' }}>
+                        {sw.name}
+                      </div>
+                      <div style={{ display: 'flex', gap: '16px' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ color: textDim, fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '2px' }}>Elapsed</div>
+                          <div style={{ color: accent, fontSize: '14px', fontWeight: '300', fontVariantNumeric: 'tabular-nums' }}>
+                            {formatStopwatchTime(sw.elapsed)}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ color: textDim, fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '2px' }}>Laps</div>
+                          <div style={{ color: accent, fontSize: '14px', fontWeight: '300' }}>
+                            {sw.laps.length}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
-
             
           </div>
   );
