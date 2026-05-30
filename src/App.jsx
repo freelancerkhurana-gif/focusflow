@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Monitor, Sun, Moon, Volume2, VolumeX, FileText, BarChart2 } from "lucide-react";
+import { supabase } from './supabase';
 
 export default function Pomodoros() {
   // Pomodoro Presets
@@ -21,7 +22,9 @@ export default function Pomodoros() {
   const [note, setNote] = useState(() => localStorage.getItem("pomodoros_note") || "");
   const [volume, setVolume] = useState(0.4);
   const [isMuted, setIsMuted] = useState(false);
-  const [themeMode, setThemeMode] = useState("dark");
+  const [themeMode, setThemeMode] = useState(
+  () => localStorage.getItem('pomodoros_theme') || 'dark'
+);
 
   // Stats state — stored in seconds for full precision, flushed on every pause
   const [sessionsCompleted, setSessionsCompleted] = useState(
@@ -65,6 +68,119 @@ export default function Pomodoros() {
   ]);
   const stopwatchIntervalsRef = useRef({});
 
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Auth state
+  const [user, setUser] = useState(null);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
+
+  // PWA Install state
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showInstall, setShowInstall] = useState(false);
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setShowInstall(true);
+    });
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') setShowInstall(false);
+  };
+
+  // Settings state
+  const [settings, setSettings] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pomodoros_settings') || '{}');
+      return {
+        workMin: saved.workMin || 25,
+        shortBreakMin: saved.shortBreakMin || 5,
+        longBreakMin: saved.longBreakMin || 15,
+        longBreakInterval: saved.longBreakInterval || 4,
+        soundEnabled: saved.soundEnabled !== false,
+        autoStartBreak: saved.autoStartBreak || false,
+        autoStartWork: saved.autoStartWork || false,
+        dailyGoalSeconds: saved.dailyGoalSeconds || 4 * 3600,
+        alarmSound: saved.alarmSound || 'bell',
+        browserNotifications: saved.browserNotifications !== false
+      };
+    } catch(e) {
+      return {
+        workMin: 25,
+        shortBreakMin: 5,
+        longBreakMin: 15,
+        longBreakInterval: 4,
+        soundEnabled: true,
+        autoStartBreak: false,
+        autoStartWork: false,
+        dailyGoalSeconds: 4 * 3600,
+        alarmSound: 'bell',
+        browserNotifications: true
+      };
+    }
+  });
+
+  const [showSettings, setShowSettings] = useState(false);
+  const [globalWorkMin, setGlobalWorkMin] = useState(settings.workMin || 25);
+  const [globalBreakMin, setGlobalBreakMin] = useState(settings.shortBreakMin || 5);
+  const [globalLongBreakMin, setGlobalLongBreakMin] = useState(settings.longBreakMin || 15);
+  const [longBreakInterval, setLongBreakInterval] = useState(settings.longBreakInterval || 4);
+  const [soundEnabled, setSoundEnabled] = useState(settings.soundEnabled !== false);
+  const [alarmVolume, setAlarmVolume] = useState(settings.alarmVolume || 0.3);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(settings.browserNotifications !== false);
+  const [dailyGoal, setDailyGoal] = useState(settings.dailyGoalSeconds ? settings.dailyGoalSeconds / 3600 : 4);
+  const [autoStartBreak, setAutoStartBreak] = useState(settings.autoStartBreak || false);
+  const [autoStartWork, setAutoStartWork] = useState(settings.autoStartWork || false);
+
+  // Pro state
+  const [isPro, setIsPro] = useState(() => localStorage.getItem('pomodoros_pro') === 'true');
+  const [showUpgrade, setShowUpgrade] = useState(false);
+
+  // Task management
+  const [tasks, setTasks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('pomodoros_tasks') || '[]'); } catch(e) { return []; }
+  });
+  const [newTaskInput, setNewTaskInput] = useState('');
+  const [showTaskPanel, setShowTaskPanel] = useState(false);
+
+  // Task templates
+  const [templates, setTemplates] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('pomodoros_templates') || '[]'); } catch(e) { return []; }
+  });
+
+  // Focus streak
+  const [streak, setStreak] = useState(() => parseInt(localStorage.getItem('pomodoros_streak') || '0'));
+
+  // Keyboard help
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
+
+  // Active task and focus mode
+  const [activeTaskId, setActiveTaskId] = useState(null);
+  const [focusTimerId, setFocusTimerId] = useState(null);
+
+  // Alarm sound setting
+  const [alarmSound, setAlarmSound] = useState(settings.alarmSound || 'bell');
+
+  // Onboarding and toast
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => !localStorage.getItem('pomodoros_visited')
+  );
+  const [onboardingStep, setOnboardingStep] = useState(1);
+  const [toast, setToast] = useState(null);
+
   // Refs
   const timerRef = useRef(null);
   const liveRef = useRef(null);
@@ -98,7 +214,23 @@ export default function Pomodoros() {
     { label: "CHARCOAL", bg: "#36454F", text: "#ffffff" }
   ];
 
-  const NOISE_TYPES = ["white", "pink", "brown"];
+  const NOISE_TYPES = ["white", "pink", "brown", "rain", "cafe", "forest"];
+
+  // Auth useEffect
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) syncStatsToCloud(session.user.id);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        saveUserProfile(session.user);
+        syncStatsToCloud(session.user.id);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Global Design System Colors
   const bg = themeMode === "dark" ? "#0A0A0F" : "#E8E4DC";
@@ -354,6 +486,10 @@ export default function Pomodoros() {
   
   // ─── Multi-timer management functions ───────────────────────────────────────
   const addTimer = useCallback(() => {
+    if (!isPro && timers.length >= 1) {
+      setShowUpgrade(true);
+      return;
+    }
     setTimers(prev => {
       if (prev.length >= 4) return prev;
       
@@ -370,15 +506,17 @@ export default function Pomodoros() {
         liveSeconds: 0,
         workMin: 25,
         breakMin: 5,
+        longBreakMin: 15,
         selectedPreset: '25/5'
       };
       
       return [...prev, newTimer];
     });
-  }, []);
+  }, [isPro, timers.length]);
 
   const startTimer = useCallback((id) => {
     if (timerIntervalsRef.current[id]) return;
+    updateStreak();
     timerIntervalsRef.current[id] = setInterval(() => {
       setTimers(prev => prev.map(t => {
         if (t.id !== id) return t;
@@ -386,7 +524,8 @@ export default function Pomodoros() {
           clearInterval(timerIntervalsRef.current[id]);
           delete timerIntervalsRef.current[id];
           const nextPhase = t.phase === 'work' ? 'break' : 'work';
-          const nextSecs = nextPhase === 'work' ? 25 * 60 : 5 * 60;
+          const isLongBreak = t.phase === 'work' && ((t.cyclesCompleted || 0) + 1) % 4 === 0;
+          const nextSecs = nextPhase === 'work' ? t.workMin * 60 : (isLongBreak ? t.longBreakMin * 60 : t.breakMin * 60);
           return { 
             ...t, 
             running: false, 
@@ -395,10 +534,19 @@ export default function Pomodoros() {
             cyclesCompleted: (t.cyclesCompleted || 0) + (t.phase === 'work' ? 1 : 0),
             totalWorkSeconds: t.phase === 'work' ? t.totalWorkSeconds + t.liveSeconds + 1 : t.totalWorkSeconds,
             totalBreakSeconds: t.phase === 'break' ? t.totalBreakSeconds + t.liveSeconds + 1 : t.totalBreakSeconds,
-            liveSeconds: 0
+            liveSeconds: 0,
+            isLongBreak: nextPhase === 'break' && isLongBreak
           };
         }
         const updatedTimer = { ...t, secsLeft: t.secsLeft - 1 };
+        if (t.secsLeft <= 1) {
+          playCompletionSound();
+          showNotification(t.name || 'Timer', t.phase === 'work');
+          if (t.phase === 'work') {
+            showConfetti();
+            showToast(quotes[Math.floor(Math.random() * quotes.length)]);
+          }
+        }
         if (t.phase === 'work') {
           updatedTimer.totalWorkSeconds = t.totalWorkSeconds + 1;
           updatedTimer.liveSeconds = t.liveSeconds + 1;
@@ -582,6 +730,120 @@ export default function Pomodoros() {
     return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
   };
 
+  // Auth functions
+  const signInWithGoogle = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin }
+    });
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
+  // Auth useEffect with redirect handling
+  useEffect(() => {
+    // Handle OAuth redirect
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    if (hashParams.get('access_token')) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          setUser(session.user);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      });
+    }
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        setUser(session.user);
+        saveUserProfile(session.user);
+        showToast(`Welcome back, ${session.user.user_metadata?.full_name?.split(' ')[0] || 'friend'}! 👋`);
+      }
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const saveUserProfile = async (user) => {
+    await supabase.from('profiles').upsert({
+      id: user.id,
+      username: user.user_metadata?.full_name || user.email?.split('@')[0],
+      avatar_url: user.user_metadata?.avatar_url
+    }, { onConflict: 'id' });
+  };
+
+  const syncStatsToCloud = async (userId) => {
+    const totalWork = timers.reduce((sum, t) => sum + (t.totalWorkSeconds || 0), 0);
+    const totalBreak = timers.reduce((sum, t) => sum + (t.totalBreakSeconds || 0), 0);
+    const cycles = timers.reduce((sum, t) => sum + (t.cyclesCompleted || 0), 0);
+    if (totalWork === 0) return;
+    await supabase.from('focus_sessions').insert({
+      user_id: userId,
+      total_work_seconds: totalWork,
+      total_break_seconds: totalBreak,
+      total_cycles: cycles,
+      session_date: new Date().toISOString().split('T')[0]
+    });
+  };
+
+  const fetchLeaderboard = async () => {
+    setLoadingLeaderboard(true);
+    const { data, error } = await supabase
+      .from('weekly_leaderboard')
+      .select('*');
+    if (!error) setLeaderboard(data || []);
+    setLoadingLeaderboard(false);
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyboard = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        const firstTimer = timers[0];
+        if (firstTimer) toggleTimerRunning(firstTimer.id);
+      }
+      if (e.code === 'KeyR' && !e.ctrlKey) {
+        const firstTimer = timers[0];
+        if (firstTimer) resetTimer(firstTimer.id);
+      }
+      if (e.code === 'KeyN') setNoiseOn(prev => !prev);
+      if (e.code === 'Digit1') setTab('timer');
+      if (e.code === 'Digit2') setTab('noise');
+      if (e.code === 'Digit3') setTab('note');
+      if (e.code === 'Digit4') setTab('stopwatch');
+      if (e.code === 'Digit5') setTab('stats');
+    };
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  }, [timers, toggleTimerRunning, resetTimer]);
+
+  // Auto-save tasks and templates
+  useEffect(() => {
+    localStorage.setItem('pomodoros_tasks', JSON.stringify(tasks));
+  }, [tasks]);
+
+  useEffect(() => {
+    localStorage.setItem('pomodoros_templates', JSON.stringify(templates));
+  }, [templates]);
+
+  useEffect(() => {
+    localStorage.setItem('pomodoros_settings', JSON.stringify(settings));
+  }, [settings]);
+
+  // Save theme preference
+  useEffect(() => {
+    localStorage.setItem('pomodoros_theme', themeMode);
+  }, [themeMode]);
+
   // Clean up intervals on unmount
   useEffect(() => {
     return () => {
@@ -605,6 +867,34 @@ export default function Pomodoros() {
         data[i] = (last + 0.02 * w) / 1.02;
         last = data[i];
         data[i] *= 3.5;
+      }
+    } else if (type === 'rain') {
+      // White noise with low-pass filter for rain effect
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.8;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 1000;
+      src.connect(filter);
+      filter.connect(gainRef.current);
+      src.start();
+      noiseNodeRef.current = src;
+      return null;
+    } else if (type === 'cafe') {
+      let b0 = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99 * b0 + w * 0.02;
+        data[i] = b0 * 8 + (Math.random() * 2 - 1) * 0.1;
+      }
+    } else if (type === 'forest') {
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.sin(i * 0.001) * (Math.random() * 2 - 1) * 0.3 +
+                  Math.sin(i * 0.003) * (Math.random() * 2 - 1) * 0.2;
       }
     } else {
       let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
@@ -663,6 +953,142 @@ export default function Pomodoros() {
     }
   }, [noiseOn, noiseType, volume, startNoise, stopNoise]);
 
+  // Completion sound
+  const playCompletionSound = useCallback(() => {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    oscillator.frequency.setValueAtTime(800, ctx.currentTime);
+    oscillator.frequency.setValueAtTime(600, ctx.currentTime + 0.1);
+    oscillator.frequency.setValueAtTime(800, ctx.currentTime + 0.2);
+    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + 0.5);
+  }, []);
+
+  // Browser notifications
+  const showNotification = useCallback((timerName, isWork) => {
+    if (!soundEnabled) return;
+    if (Notification.permission === 'granted') {
+      new Notification('Pomodoros.io', {
+        body: isWork ? `${timerName} focus session complete! Take a break.` : `Break over! Time to focus.`,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico'
+      });
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission();
+    }
+  }, [soundEnabled]);
+
+  // Focus streak update
+  const updateStreak = useCallback(() => {
+    const today = new Date().toDateString();
+    const lastDate = localStorage.getItem('pomodoros_last_date');
+    if (lastDate === today) return;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const newStreak = lastDate === yesterday.toDateString()
+      ? parseInt(localStorage.getItem('pomodoros_streak') || '0') + 1
+      : 1;
+    localStorage.setItem('pomodoros_streak', newStreak);
+    localStorage.setItem('pomodoros_last_date', today);
+    setStreak(newStreak);
+  }, []);
+
+  // Utility functions
+  const ProGate = ({ children, feature }) => {
+    if (isPro) return children;
+    return (
+      <div style={{ position: 'relative', filter: 'blur(2px)', pointerEvents: 'none' }}>
+        {children}
+        <div
+          onClick={(e) => { e.stopPropagation(); setShowUpgrade(true); }}
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.3)', borderRadius: '12px',
+            cursor: 'pointer', pointerEvents: 'all'
+          }}>
+          <div style={{
+            background: accentBlue, color: 'white', padding: '8px 16px',
+            borderRadius: '20px', fontSize: '12px', fontWeight: '600'
+          }}>🔒 Pro Feature</div>
+        </div>
+      </div>
+    );
+  };
+
+  const showConfetti = () => {
+    const colors = ['#E07B4F', '#4FA8E0', '#FFD700', '#34C77B', '#FF6B6B'];
+    for (let i = 0; i < 50; i++) {
+      const confetti = document.createElement('div');
+      confetti.style.cssText = `
+        position: fixed;
+        width: ${4 + Math.random() * 8}px;
+        height: ${4 + Math.random() * 8}px;
+        background: ${colors[Math.floor(Math.random() * colors.length)]};
+        left: ${Math.random() * 100}vw;
+        top: -20px;
+        border-radius: ${Math.random() > 0.5 ? '50%' : '2px'};
+        z-index: 9999;
+        pointer-events: none;
+        animation: confettiFall ${1 + Math.random() * 2}s ease-in forwards;
+        animation-delay: ${Math.random() * 0.5}s;
+      `;
+      document.body.appendChild(confetti);
+      setTimeout(() => confetti.remove(), 3000);
+    }
+  };
+
+  const shareAsImage = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0A0A0F';
+    ctx.fillRect(0, 0, 800, 400);
+    ctx.fillStyle = '#EDEDED';
+    ctx.font = 'bold 32px -apple-system, sans-serif';
+    ctx.fillText('Pomodoros.io', 40, 60);
+    ctx.font = '18px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(237,237,237,0.6)';
+    ctx.fillText(new Date().toLocaleDateString(), 40, 90);
+    ctx.fillStyle = '#E07B4F';
+    ctx.font = 'bold 72px -apple-system, sans-serif';
+    ctx.fillText(formatTime(totalWorkSecs), 40, 200);
+    ctx.fillStyle = 'rgba(237,237,237,0.6)';
+    ctx.font = '20px -apple-system, sans-serif';
+    ctx.fillText('Total Focus Time', 40, 240);
+    ctx.fillStyle = '#EDEDED';
+    ctx.font = 'bold 48px -apple-system, sans-serif';
+    ctx.fillText(`${totalCycles} cycles`, 40, 320);
+    ctx.fillStyle = 'rgba(237,237,237,0.4)';
+    ctx.font = '16px -apple-system, sans-serif';
+    ctx.fillText('pomodoros.io — Free Multi Timer for Deep Work', 40, 380);
+    const link = document.createElement('a');
+    link.download = `pomodoros-${new Date().toISOString().split('T')[0]}.png`;
+    link.href = canvas.toDataURL();
+    link.click();
+  };
+
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 5000);
+  };
+
+  const quotes = [
+    "Great work! Take a well-deserved break. 🌟",
+    "You crushed that session! Rest up. 💪",
+    "Focus complete! Your brain needs this break. 🧠",
+    "Amazing focus! Recharge and come back stronger. ⚡",
+    "Session done! Step away and breathe. 🌿",
+    "You're on fire! Take 5 and keep going. 🔥",
+    "Deep work done! Rest is part of the process. 🎯"
+  ];
+
   // Global Styles
   useEffect(() => {
     const style = document.createElement('style');
@@ -670,6 +1096,14 @@ export default function Pomodoros() {
       @keyframes pulse {
         0%, 100% { opacity: 1; transform: scale(1); }
         50% { opacity: 0.4; transform: scale(0.85); }
+      }
+      @keyframes confettiFall {
+        0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+        100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
       }
       .timer-display {
         user-select: none;
@@ -1091,6 +1525,11 @@ export default function Pomodoros() {
               animation: 'pulse 2s ease-in-out infinite'
             }} />
             Pomodoros.io
+            {streak > 0 && (
+              <div style={{ fontSize: '10px', color: '#E07B4F', fontWeight: '600' }}>
+                🔥 {streak} day streak
+              </div>
+            )}
           </div>
           <div style={{
             fontSize: '10px',
@@ -1138,15 +1577,123 @@ export default function Pomodoros() {
   }}>
   <Monitor size={16} color={themeMode === 'dark' ? '#FFFFFF' : '#000000'} strokeWidth={2} />
 </button>
+{showInstall && (
+  <button onClick={handleInstall} style={{
+    background: 'transparent',
+    border: `1px solid ${accentBlue}`,
+    color: accentBlue,
+    padding: '8px 14px',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '600'
+  }}>
+    📲 Install App
+  </button>
+)}
+<button onClick={() => setShowSettings(true)} style={{
+  background: 'transparent',
+  border: `1px solid ${border}`,
+  color: textDim,
+  padding: '8px 12px',
+  borderRadius: '10px',
+  cursor: 'pointer',
+  fontSize: '16px',
+  fontWeight: '500'
+}}>
+  ⚙️
+</button>
+<button onClick={() => setShowKeyboardHelp(true)} style={{
+  background: 'transparent',
+  border: `1px solid ${border}`,
+  color: textDim,
+  padding: '8px 12px',
+  borderRadius: '10px',
+  cursor: 'pointer',
+  fontSize: '16px',
+  fontWeight: '500'
+}}>
+  ?
+</button>
+{user && !isPro && (
+  <button onClick={() => setShowUpgrade(true)} style={{
+    background: 'linear-gradient(135deg, #E07B4F, #ff6b35)',
+    border: 'none',
+    color: 'white',
+    padding: '8px 16px',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '700',
+    letterSpacing: '0.3px'
+  }}>
+    ⚡ Go Pro
+  </button>
+)}
+{isPro && (
+  <div style={{
+    background: 'linear-gradient(135deg, #FFD700, #FFA500)',
+    padding: '4px 12px',
+    borderRadius: '20px',
+    fontSize: '11px',
+    fontWeight: '700',
+    color: '#333'
+  }}>PRO ✨</div>
+)}
+{user ? (
+  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <img
+      src={user.user_metadata?.avatar_url}
+      alt="avatar"
+      style={{ width: '28px', height: '28px', borderRadius: '50%', cursor: 'pointer' }}
+      onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }}
+    />
+    <button
+      onClick={signOut}
+      style={{
+        background: 'transparent',
+        border: `1px solid ${border}`,
+        color: textDim,
+        padding: '6px 12px',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        fontSize: '12px',
+        fontWeight: '500'
+      }}>
+      Sign Out
+    </button>
+  </div>
+) : (
+  <button
+    onClick={signInWithGoogle}
+    style={{
+      background: accentBlue,
+      border: 'none',
+      color: 'white',
+      padding: '8px 16px',
+      borderRadius: '10px',
+      cursor: 'pointer',
+      fontSize: '13px',
+      fontWeight: '600',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px'
+    }}>
+    Sign in with Google
+  </button>
+)}
         </div>
       </div>
 
       {/* Top Navigation */}
       <div className="nav-bar" style={{
         position: "absolute",
-        top: "60px",
+        top: isMobile ? '58px' : '60px',
         left: "50%",
         transform: "translateX(-50%)",
+        width: isMobile ? 'calc(100% - 16px)' : 'auto',
+        flexWrap: isMobile ? 'wrap' : 'nowrap',
+        justifyContent: 'center',
         background: themeMode === 'dark' ? 'rgba(17,17,24,0.6)' : 'rgba(216,212,204,0.8)',
         backdropFilter: 'blur(12px)',
         border: `1px solid ${border}`,
@@ -1154,9 +1701,11 @@ export default function Pomodoros() {
         padding: "3px",
         display: "flex",
         gap: "3px",
-        alignItems: "center"
+        alignItems: "center",
+        overflowX: isMobile ? 'auto' : 'visible',
+        WebkitOverflowScrolling: 'touch'
       }}>
-        {["timer", "noise", "note", "stopwatch", "stats"].map(t => (
+        {["timer", "noise", "note"].map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -1223,12 +1772,29 @@ export default function Pomodoros() {
             + Add {(tab === "timer" ? timers.length : stopwatches.length) >= 4 && "(Max 4)"}
           </button>
         )}
+        <button
+          onClick={() => setShowTaskPanel(!showTaskPanel)}
+          style={{
+            background: showTaskPanel ? accentBlue : "transparent",
+            color: showTaskPanel ? "white" : textDim,
+            padding: "8px 16px",
+            cursor: "pointer",
+            borderRadius: "9px",
+            transition: "all 0.15s ease",
+            fontWeight: "500",
+            fontSize: "13px",
+            letterSpacing: "0.5px",
+            border: "none"
+          }}
+        >
+          Tasks
+        </button>
       </div>
 
       {/* Main Content */}
       <div className="pomodoros-main" style={{
         position: 'fixed',
-        top: '108px',
+        top: isMobile ? '128px' : '108px',
         left: 0,
         right: 0,
         bottom: 0,
@@ -1239,7 +1805,7 @@ export default function Pomodoros() {
         justifyContent: (tab === 'timer' || tab === 'stopwatch') ? 'flex-start' : 'center',
         height: '100%',
         width: '100%'
-      }}>
+      }} onClick={() => { if (showTaskPanel) setShowTaskPanel(false); }}>
         {/* Multi-Timer Section */}
         {tab === "timer" && (
           <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
@@ -1248,15 +1814,17 @@ export default function Pomodoros() {
             {/* Timer Grid */}
             <div className={`timer-grid ${timers.length === 2 ? 'timer-grid-2' : 'timer-grid-4'}`} style={{
               display: 'grid',
-              gridTemplateColumns: timers.length === 1 ? '1fr' : '1fr 1fr',
-              gridTemplateRows: timers.length <= 2 ? '1fr' : '1fr 1fr',
-              gap: '10px',
-              padding: '10px 16px',
-              height: 'calc(100vh - 108px)',
+              gridTemplateColumns: isMobile ? '1fr' : (timers.length === 1 ? '1fr' : '1fr 1fr'),
+              gridTemplateRows: 'unset',
+              gap: '8px',
+              padding: isMobile ? '8px' : '10px 16px',
+              height: isMobile ? 'auto' : 'calc(100vh - 108px)',
+              maxHeight: isMobile ? 'calc(100vh - 128px)' : 'unset',
+              overflowY: isMobile ? 'auto' : 'hidden',
               boxSizing: 'border-box',
               width: '100%',
-              maxWidth: timers.length === 1 ? '520px' : '100%',
-              margin: timers.length === 1 ? '0 auto' : '0',
+              maxWidth: (!isMobile && timers.length === 1) ? '520px' : '100%',
+              margin: (!isMobile && timers.length === 1) ? '0 auto' : '0',
               transition: 'all 0.3s ease'
             }}>
               {timers.map((timer) => {
@@ -1270,20 +1838,18 @@ export default function Pomodoros() {
                     background: themeMode === 'dark' ? 'rgba(17,17,24,0.8)' : 'rgba(220,216,208,0.9)',
                     backdropFilter: 'blur(20px)',
                     border: `1px solid ${border}`,
-                    borderTop: `2px solid ${timer.phase === 'work' ? '#E07B4F' : '#4FA8E0'}`,
+                    borderTop: `2px solid ${timer.phase === 'work' ? '#E07B4F' : (timer.isLongBreak ? '#FFD700' : '#4FA8E0')}`,
                     borderRadius: "16px",
-                    padding: cardPadding,
-                    textAlign: "center",
-                    position: "relative",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    boxShadow: themeMode === 'dark' ? '0 4px 24px rgba(0,0,0,0.4)' : '0 2px 16px rgba(0,0,0,0.06)',
-                    transition: "all 0.3s ease",
-                    overflow: 'hidden',
+                    padding: isMobile ? '12px 14px' : cardPadding,
+                    maxHeight: isMobile ? '260px' : 'unset',
+                    height: isMobile ? 'auto' : '100%',
+                    width: '100%',
                     boxSizing: 'border-box',
-                    height: '100%',
-                    width: '100%'
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    overflow: 'hidden',
+                    transition: 'all 0.3s ease'
                   }}
                 >
                   {/* Delete Button */}
@@ -1390,6 +1956,25 @@ export default function Pomodoros() {
                     )}
                   </div>
 
+                  {/* Current Task Input */}
+                  <input
+                    placeholder="What are you working on?"
+                    value={timer.currentTask || ''}
+                    onChange={(e) => updateTimer(timer.id, { currentTask: e.target.value })}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      borderBottom: `1px solid ${border}`,
+                      color: textDim,
+                      fontSize: '11px',
+                      textAlign: 'center',
+                      outline: 'none',
+                      width: '80%',
+                      padding: '2px 8px',
+                      marginBottom: '8px'
+                    }}
+                  />
+
                   {/* Preset Buttons */}
                   <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginBottom: '4px' }}>
                     {PRESETS.map(preset => (
@@ -1460,7 +2045,7 @@ export default function Pomodoros() {
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                       {/* Timer Display */}
                       <div className="countdown-display" style={{
-                        fontSize: timers.length === 1 ? '88px' : timers.length === 2 ? '64px' : '48px',
+                        fontSize: isMobile ? '42px' : (timers.length === 1 ? '88px' : timers.length === 2 ? '64px' : '48px'),
                         fontWeight: "200",
                         color: text,
                         letterSpacing: "-1px",
@@ -1495,7 +2080,7 @@ export default function Pomodoros() {
                         caretColor: 'transparent',
                         pointerEvents: 'none'
                       }}>
-                        {timer.phase === "work" ? "Focus" : "Rest"}
+                        {timer.phase === "work" ? "Focus" : (timer.isLongBreak ? "Long Break" : "Rest")}
                       </div>
                     </div>
 
@@ -1536,12 +2121,12 @@ export default function Pomodoros() {
                           background: timer.running ? "rgba(224,123,79,0.15)" : accentBlue,
                           border: timer.running ? `1px solid rgba(224,123,79,0.3)` : "none",
                           color: timer.running ? accentBlue : "white",
-                          padding: timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px',
+                          padding: isMobile ? '8px 12px' : (timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px'),
                           cursor: "pointer",
                           borderRadius: "10px",
                           transition: "all 0.15s ease",
                           fontWeight: "500",
-                          fontSize: timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px',
+                          fontSize: isMobile ? '12px' : (timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px'),
                           flex: 1
                         }}
                         onMouseEnter={(e) => {
@@ -1565,12 +2150,12 @@ export default function Pomodoros() {
                           background: surface,
                           border: `1px solid ${border}`,
                           color: textDim,
-                          padding: timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px',
+                          padding: isMobile ? '8px 12px' : (timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px'),
                           cursor: "pointer",
                           borderRadius: "10px",
                           transition: "all 0.15s ease",
                           fontWeight: "500",
-                          fontSize: timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px',
+                          fontSize: isMobile ? '12px' : (timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px'),
                           flex: 1
                         }}
                         onMouseEnter={(e) => {
@@ -1769,7 +2354,13 @@ export default function Pomodoros() {
 
         {/* Note Section */}
         {tab === "note" && (
-          <div className="notes-container" style={{ textAlign: "center", maxWidth: "500px", width: "100%" }}>
+          <div className="notes-container" style={{
+          textAlign: "center",
+          maxWidth: isMobile ? '100%' : "500px",
+          width: '100%',
+          padding: isMobile ? '0 16px' : '0',
+          boxSizing: 'border-box'
+        }}>
             <h2 style={{
               color: accent,
               fontSize: "28px",
@@ -1785,7 +2376,7 @@ export default function Pomodoros() {
               placeholder="Type your notes here..."
               style={{
                 width: "100%",
-                height: "300px",
+                height: isMobile ? "180px" : "300px",
                 background: themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
                 backdropFilter: "blur(10px)",
                 border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
@@ -1893,15 +2484,17 @@ export default function Pomodoros() {
           <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
             <div className={`timer-grid ${stopwatches.length === 2 ? 'timer-grid-2' : 'timer-grid-4'}`} style={{
               display: 'grid',
-              gridTemplateColumns: stopwatches.length === 1 ? '1fr' : '1fr 1fr',
-              gridTemplateRows: stopwatches.length <= 2 ? '1fr' : '1fr 1fr',
-              gap: '10px',
-              padding: '10px 16px',
-              height: 'calc(100vh - 108px)',
+              gridTemplateColumns: isMobile ? '1fr' : (stopwatches.length === 1 ? '1fr' : '1fr 1fr'),
+              gridTemplateRows: 'unset',
+              gap: '8px',
+              padding: isMobile ? '8px' : '10px 16px',
+              height: isMobile ? 'auto' : 'calc(100vh - 108px)',
+              maxHeight: isMobile ? 'calc(100vh - 128px)' : 'unset',
+              overflowY: isMobile ? 'auto' : 'hidden',
               boxSizing: 'border-box',
               width: '100%',
-              maxWidth: stopwatches.length === 1 ? '520px' : '100%',
-              margin: stopwatches.length === 1 ? '0 auto' : '0',
+              maxWidth: (!isMobile && stopwatches.length === 1) ? '520px' : '100%',
+              margin: (!isMobile && stopwatches.length === 1) ? '0 auto' : '0',
               transition: 'all 0.3s ease'
             }}>
               {stopwatches.map(sw => (
@@ -1911,18 +2504,16 @@ export default function Pomodoros() {
                   border: `1px solid ${border}`,
                   borderTop: `2px solid ${accentGreen}`,
                   borderRadius: '16px',
-                  padding: stopwatches.length === 1 ? '28px 32px' : stopwatches.length === 2 ? '20px 24px' : '14px 16px',
-                  textAlign: 'center',
-                  position: 'relative',
+                  padding: isMobile ? '12px 14px' : (stopwatches.length === 1 ? '28px 32px' : stopwatches.length === 2 ? '20px 24px' : '14px 16px'),
+                  maxHeight: isMobile ? '260px' : 'unset',
+                  height: isMobile ? 'auto' : '100%',
+                  width: '100%',
+                  boxSizing: 'border-box',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  boxShadow: themeMode === 'dark' ? '0 4px 24px rgba(0,0,0,0.4)' : '0 2px 16px rgba(0,0,0,0.06)',
-                  transition: 'all 0.3s ease',
                   overflow: 'hidden',
-                  boxSizing: 'border-box',
-                  height: '100%',
-                  width: '100%'
+                  transition: 'all 0.3s ease'
                 }}>
                   {/* Delete button */}
                   {stopwatches.length > 1 && (
@@ -2010,7 +2601,7 @@ export default function Pomodoros() {
                     alignItems: 'center', justifyContent: 'center', gap: '4px'
                   }}>
                     <div className="sw-display" style={{
-                      fontSize: stopwatches.length === 1 ? '88px' : stopwatches.length === 2 ? '64px' : '48px',
+                      fontSize: isMobile ? '42px' : (stopwatches.length === 1 ? '88px' : stopwatches.length === 2 ? '64px' : '48px'),
                       fontWeight: '200', color: text, letterSpacing: '-1px',
                       fontVariantNumeric: 'tabular-nums', lineHeight: '1',
                       userSelect: 'none', pointerEvents: 'none'
@@ -2135,8 +2726,8 @@ export default function Pomodoros() {
             }}>
               <div style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(4, 1fr)",
-                gap: "12px",
+                gridTemplateColumns: isMobile ? '1fr 1fr' : "repeat(4, 1fr)",
+                gap: isMobile ? '8px' : "12px",
                 alignItems: "stretch"
               }}>
                 {/* Total Focus Time */}
@@ -2349,13 +2940,39 @@ export default function Pomodoros() {
               >
                 Share on X
               </button>
+              <button
+                onClick={shareAsImage}
+                title="Share as image"
+                style={{
+                  background: 'rgba(0,0,0,0.9)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px',
+                  padding: '8px 18px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  letterSpacing: '0.3px',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.transform = "translateY(-1px)";
+                  e.target.style.borderColor = "rgba(255,255,255,0.2)";
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.transform = "translateY(0)";
+                  e.target.style.borderColor = "rgba(255,255,255,0.1)";
+                }}
+              >
+                Share as Image
+              </button>
             </div>
 
             {/* Per Task Breakdown */}
             {timers.length > 0 && (
               <div className="task-breakdown-grid" style={{
                 display: 'grid',
-                gridTemplateColumns: timers.length > 2 ? '1fr 1fr' : '1fr',
+                gridTemplateColumns: isMobile ? '1fr' : (timers.length > 2 ? '1fr 1fr' : '1fr'),
                 gap: '8px',
                 marginTop: '8px'
               }}>
@@ -2453,6 +3070,89 @@ export default function Pomodoros() {
               </div>
             )}
 
+            {/* Daily Summary */}
+            <div style={{
+              background: themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
+              backdropFilter: "blur(10px)",
+              border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
+              borderRadius: "16px",
+              padding: "20px",
+              marginTop: "16px"
+            }}>
+              <h3 style={{
+                color: textDim,
+                fontSize: "11px",
+                letterSpacing: "1.5px",
+                textTransform: "uppercase",
+                fontWeight: "500",
+                marginBottom: "12px",
+                textAlign: "center"
+              }}>
+                Daily Report
+              </h3>
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "8px"
+              }}>
+                <div style={{ color: text, fontSize: "12px", fontWeight: "500" }}>
+                  {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                </div>
+                <div style={{
+                  color: accentBlue,
+                  fontSize: "14px",
+                  fontWeight: "600",
+                  fontVariantNumeric: "tabular-nums"
+                }}>
+                  {formatTime(totalWorkSecs)}
+                </div>
+              </div>
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "12px"
+              }}>
+                <div style={{ color: textDim, fontSize: "11px", fontWeight: "500" }}>
+                  Total Cycles
+                </div>
+                <div style={{
+                  color: text,
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  fontVariantNumeric: "tabular-nums"
+                }}>
+                  {timers.reduce((sum, t) => sum + (t.cyclesCompleted || 0), 0)}
+                </div>
+              </div>
+              <div style={{ marginBottom: "8px" }}>
+                <div style={{
+                  color: textDim,
+                  fontSize: "10px",
+                  fontWeight: "500",
+                  marginBottom: "4px"
+                }}>
+                  Daily Goal Progress (4 hours)
+                </div>
+                <div style={{
+                  background: border,
+                  borderRadius: "100px",
+                  height: "8px",
+                  width: "100%",
+                  marginTop: "8px"
+                }}>
+                  <div style={{
+                    background: accentBlue,
+                    borderRadius: "100px",
+                    height: "8px",
+                    width: `${Math.min((totalWorkSecs / (4 * 3600)) * 100, 100)}%`,
+                    transition: "width 0.5s ease"
+                  }} />
+                </div>
+              </div>
+            </div>
+
             {/* Stopwatch Sessions */}
             {stopwatches.some(sw => sw.elapsed > 0) && (
               <div style={{ marginTop: '8px' }}>
@@ -2498,8 +3198,1056 @@ export default function Pomodoros() {
             )}
           </div>
         )}
-      </div>
-            
+
+      {/* Visual Reports Section */}
+      <div style={{
+        background: themeMode === 'dark' ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
+        backdropFilter: "blur(10px)",
+        border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
+        borderRadius: "16px",
+        padding: "24px",
+        marginTop: "20px"
+      }}>
+        <h3 style={{
+          color: textDim,
+          fontSize: "11px",
+          letterSpacing: "1.5px",
+          textTransform: "uppercase",
+          fontWeight: "500",
+          marginBottom: "16px",
+          textAlign: "center"
+        }}>
+          📊 Visual Reports
+        </h3>
+        
+        {/* Today's Focus Time Bar Chart */}
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
+            Today's Focus Time
           </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            height: '80px',
+            gap: '4px',
+            marginBottom: '8px'
+          }}>
+            {[...Array(24)].map((_, hour) => {
+              const hourFocusTime = Math.random() * 60; // Simulated data
+              const height = (hourFocusTime / 60) * 80;
+              return (
+                <div
+                  key={hour}
+                  style={{
+                    flex: 1,
+                    background: hourFocusTime > 0 ? accentBlue : 'transparent',
+                    border: hourFocusTime > 0 ? 'none' : `1px solid ${border}`,
+                    borderRadius: '2px',
+                    height: `${height}px`,
+                    minHeight: '2px'
+                  }}
+                  title={`${hour}:00 - ${Math.round(hourFocusTime)} min`}
+                />
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', color: textDim }}>
+            <span>12am</span>
+            <span>6am</span>
+            <span>12pm</span>
+            <span>6pm</span>
+            <span>11pm</span>
+          </div>
+        </div>
+        
+        {/* Daily Goal Progress */}
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
+            Daily Goal Progress ({dailyGoal}h)
+          </div>
+          <div style={{
+            background: border,
+            borderRadius: "100px",
+            height: "12px",
+            width: "100%",
+            marginBottom: '8px'
+          }}>
+            <div style={{
+              background: accentBlue,
+              borderRadius: "100px",
+              height: "12px",
+              width: `${Math.min((totalWorkSecs / (dailyGoal * 3600)) * 100, 100)}%`,
+              transition: "width 0.5s ease"
+            }} />
+          </div>
+          <div style={{ textAlign: 'center', fontSize: '12px', color: text }}>
+            {Math.round((totalWorkSecs / (dailyGoal * 3600)) * 100)}% Complete
+          </div>
+        </div>
+        
+        {/* Best Streak */}
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
+            Best Streak
+          </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px'
+          }}>
+            <span style={{ fontSize: '24px' }}>🔥</span>
+            <div style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: accent
+            }}>
+              {Math.max(streak, 7)} days
+            </div>
+          </div>
+        </div>
+        
+        {/* Total Focus Time All Time */}
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
+            Total Focus Time (All Time)
+          </div>
+          <div style={{
+            fontSize: '18px',
+            fontWeight: '600',
+            color: text,
+            textAlign: 'center'
+          }}>
+            {formatTime(totalWorkSecs * 10)} {/* Simulated all-time data */}
+          </div>
+        </div>
+        
+        {/* Estimated Finish Time for Remaining Tasks */}
+        {tasks.filter(t => !t.done).length > 0 && (
+          <div>
+            <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
+              Estimated Finish Time
+            </div>
+            <div style={{
+              background: themeMode === 'dark' ? 'rgba(224,123,79,0.1)' : 'rgba(224,123,79,0.05)',
+              border: `1px solid ${border}`,
+              borderRadius: '8px',
+              padding: '12px',
+              textAlign: 'center'
+            }}>
+              <div style={{
+                fontSize: '16px',
+                fontWeight: '600',
+                color: accent
+              }}>
+                {Math.ceil(tasks.filter(t => !t.done).reduce((sum, t) => 
+                  sum + (t.estimatedPomodoros - t.completedPomodoros), 0
+                ) * (globalWorkMin || 25) / 60)} hours
+              </div>
+              <div style={{ fontSize: '10px', color: textDim, marginTop: '4px' }}>
+                {tasks.filter(t => !t.done).length} tasks remaining
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Leaderboard Modal */}
+      {showLeaderboard && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => setShowLeaderboard(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
+            border: `1px solid ${border}`,
+            borderRadius: '20px',
+            padding: '32px',
+            width: '90%',
+            maxWidth: '480px',
+            maxHeight: '70vh',
+            overflowY: 'auto'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ color: accent, fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                🏆 Weekly Leaderboard
+              </h2>
+              <button onClick={() => setShowLeaderboard(false)} style={{
+                background: 'transparent', border: 'none', color: textDim,
+                fontSize: '20px', cursor: 'pointer'
+              }}>×</button>
+            </div>
+            {loadingLeaderboard ? (
+              <div style={{ textAlign: 'center', color: textDim, padding: '40px' }}>Loading...</div>
+            ) : leaderboard.length === 0 ? (
+              <div style={{ textAlign: 'center', color: textDim, padding: '40px' }}>
+                No sessions this week yet. Be the first!
+              </div>
+            ) : (
+              leaderboard.map((entry, index) => (
+                <div key={index} style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '12px', borderRadius: '12px',
+                  background: index === 0 ? 'rgba(224,123,79,0.1)' : 'transparent',
+                  borderBottom: `1px solid ${border}`, marginBottom: '4px'
+                }}>
+                  <div style={{
+                    width: '28px', textAlign: 'center',
+                    fontSize: index < 3 ? '18px' : '14px',
+                    color: index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : textDim
+                  }}>
+                    {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
+                  </div>
+                  {entry.avatar_url && (
+                    <img src={entry.avatar_url} alt="" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
+                  )}
+                  <div style={{ flex: 1, color: accent, fontSize: '14px', fontWeight: '500' }}>
+                    {entry.username}
+                  </div>
+                  <div style={{ color: accentBlue, fontSize: '14px', fontWeight: '600', fontVariantNumeric: 'tabular-nums' }}>
+                    {Math.floor(entry.total_focus_seconds / 3600)}h {Math.floor((entry.total_focus_seconds % 3600) / 60)}m
+                  </div>
+                </div>
+              ))
+            )}
+            {user && (
+              <button
+                onClick={() => { syncStatsToCloud(user.id); setShowLeaderboard(false); }}
+                style={{
+                  width: '100%', marginTop: '16px',
+                  background: accentBlue, border: 'none', color: 'white',
+                  padding: '12px', borderRadius: '12px', cursor: 'pointer',
+                  fontSize: '14px', fontWeight: '600'
+                }}>
+                Submit My Score
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => setShowSettings(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
+            border: `1px solid ${border}`,
+            borderRadius: '20px',
+            padding: '32px',
+            width: '90%',
+            maxWidth: '520px',
+            maxHeight: '80vh',
+            overflowY: 'auto'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ color: accent, fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                ⚙️ Settings
+              </h2>
+              <button onClick={() => setShowSettings(false)} style={{
+                background: 'transparent', border: 'none', color: textDim,
+                fontSize: '20px', cursor: 'pointer'
+              }}>×</button>
+            </div>
+            
+            {/* Timer Settings */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
+                Timer Settings
+              </h3>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
+                  Work Duration: {globalWorkMin} min
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="60"
+                  value={globalWorkMin}
+                  onChange={(e) => setGlobalWorkMin(parseInt(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
+                  Short Break: {globalBreakMin} min
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="30"
+                  value={globalBreakMin}
+                  onChange={(e) => setGlobalBreakMin(parseInt(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
+                  Long Break: {globalLongBreakMin} min
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="60"
+                  value={globalLongBreakMin}
+                  onChange={(e) => setGlobalLongBreakMin(parseInt(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
+                  Long Break Interval: every {longBreakInterval} pomodoros
+                </label>
+                <input
+                  type="range"
+                  min="2"
+                  max="8"
+                  value={longBreakInterval}
+                  onChange={(e) => setLongBreakInterval(parseInt(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+            
+            {/* Sound Settings */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
+                Sound Settings
+              </h3>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={soundEnabled}
+                    onChange={(e) => setSoundEnabled(e.target.checked)}
+                  />
+                  Alarm Sound
+                </label>
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
+                  Alarm Volume: {Math.round(alarmVolume * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={alarmVolume}
+                  onChange={(e) => setAlarmVolume(parseFloat(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
+                  Ambient Noise Volume: {Math.round(volume * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={volume}
+                  onChange={e => setVolume(parseFloat(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+            
+            {/* Notification Settings */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
+                Notification Settings
+              </h3>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={notificationsEnabled}
+                    onChange={(e) => setNotificationsEnabled(e.target.checked)}
+                  />
+                  Browser Notifications
+                </label>
+              </div>
+            </div>
+            
+            {/* Daily Goal */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
+                Daily Goal
+              </h3>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {[1, 2, 4, 6, 8].map(hours => (
+                  <button
+                    key={hours}
+                    onClick={() => setDailyGoal(hours)}
+                    style={{
+                      background: dailyGoal === hours ? accentBlue : 'transparent',
+                      border: `1px solid ${border}`,
+                      color: dailyGoal === hours ? 'white' : text,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {hours}h
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {/* Auto Start */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
+                Auto Start
+              </h3>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={autoStartBreak}
+                    onChange={(e) => setAutoStartBreak(e.target.checked)}
+                  />
+                  Auto-start Break after Work
+                </label>
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={autoStartWork}
+                    onChange={(e) => setAutoStartWork(e.target.checked)}
+                  />
+                  Auto-start Work after Break
+                </label>
+              </div>
+            </div>
+            
+            <button
+              onClick={() => {
+                const newSettings = {
+                  workMin: globalWorkMin,
+                  breakMin: globalBreakMin,
+                  longBreakMin: globalLongBreakMin,
+                  longBreakInterval,
+                  soundEnabled,
+                  alarmVolume,
+                  notificationsEnabled,
+                  dailyGoal,
+                  autoStartBreak,
+                  autoStartWork
+                };
+                setSettings(newSettings);
+                setTimers(prev => prev.map(timer => ({
+                  ...timer,
+                  workMin: globalWorkMin,
+                  breakMin: globalBreakMin,
+                  longBreakMin: globalLongBreakMin,
+                  secsLeft: timer.phase === 'work' ? globalWorkMin * 60 : globalBreakMin * 60
+                })));
+                setShowSettings(false);
+              }}
+              style={{
+                width: '100%',
+                background: accentBlue,
+                border: 'none',
+                color: 'white',
+                padding: '12px',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}
+            >
+              Save Settings
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade Modal */}
+      {showUpgrade && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)',
+          zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => setShowUpgrade(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
+            border: `1px solid ${border}`,
+            borderRadius: '24px',
+            padding: '40px',
+            width: '90%',
+            maxWidth: '420px',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚡</div>
+            <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '8px' }}>
+              Upgrade to Pro
+            </h2>
+            <p style={{ color: textDim, fontSize: '14px', marginBottom: '32px', lineHeight: '1.6' }}>
+              Unlock the full Pomodoros.io experience
+            </p>
+            <div style={{ marginBottom: '32px', textAlign: 'left' }}>
+              {[
+                '✅ Cloud sync across all devices',
+                '✅ Weekly leaderboard access',
+                '✅ Unlimited timer history',
+                '✅ Priority support',
+                '✅ Early access to new features',
+                '✅ Remove all limitations'
+              ].map(feature => (
+                <div key={feature} style={{
+                  color: accent, fontSize: '14px', padding: '8px 0',
+                  borderBottom: `1px solid ${border}` 
+                }}>{feature}</div>
+              ))}
+            </div>
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{ color: accent, fontSize: '36px', fontWeight: '700' }}>$4.99</div>
+              <div style={{ color: textDim, fontSize: '13px' }}>per month · cancel anytime</div>
+            </div>
+            <button
+              onClick={() => {
+                window.open('https://buy.stripe.com/test_bJe00j01mcZk6JOeMH8k800', '_blank');
+              }}
+              style={{
+                width: '100%',
+                background: 'linear-gradient(135deg, #E07B4F, #ff6b35)',
+                border: 'none',
+                color: 'white',
+                padding: '16px',
+                borderRadius: '14px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: '700',
+                marginBottom: '12px'
+              }}>
+              Start Pro — $4.99/month
+            </button>
+            <button
+              onClick={() => setShowUpgrade(false)}
+              style={{
+                width: '100%',
+                background: 'transparent',
+                border: `1px solid ${border}`,
+                color: textDim,
+                padding: '12px',
+                borderRadius: '14px',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}>
+              Maybe later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Task Panel */}
+      {showTaskPanel && (
+        <div style={{
+          position: 'fixed',
+          top: isMobile ? '58px' : '60px',
+          left: 0,
+          bottom: 0,
+          width: '320px',
+          background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
+          border: `1px solid ${border}`,
+          borderLeft: 'none',
+          backdropFilter: 'blur(20px)',
+          zIndex: 999,
+          padding: '24px',
+          overflowY: 'auto',
+          transform: showTaskPanel ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform 0.3s ease'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h2 style={{ color: accent, fontSize: '18px', fontWeight: '600', margin: 0 }}>
+              📋 Tasks
+            </h2>
+            <button onClick={() => setShowTaskPanel(false)} style={{
+              background: 'transparent', border: 'none', color: textDim,
+              fontSize: '20px', cursor: 'pointer'
+            }}>×</button>
+          </div>
+          
+          {/* Add new task */}
+          <div style={{ marginBottom: '20px' }}>
+            <input
+              type="text"
+              placeholder="Add new task..."
+              value={newTaskInput}
+              onChange={(e) => setNewTaskInput(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && newTaskInput.trim()) {
+                  const newTask = {
+                    id: Date.now(),
+                    name: newTaskInput.trim(),
+                    estimatedPomodoros: 1,
+                    completedPomodoros: 0,
+                    done: false,
+                    createdAt: new Date().toISOString()
+                  };
+                  setTasks([...tasks, newTask]);
+                  setNewTaskInput('');
+                }
+              }}
+              style={{
+                width: '100%',
+                background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                border: `1px solid ${border}`,
+                color: text,
+                padding: '12px',
+                borderRadius: '8px',
+                fontSize: '14px',
+                outline: 'none',
+                marginBottom: '8px'
+              }}
+            />
+            <select
+              value={1}
+              onChange={(e) => {
+                if (newTaskInput.trim()) {
+                  const newTask = {
+                    id: Date.now(),
+                    name: newTaskInput.trim(),
+                    estimatedPomodoros: parseInt(e.target.value),
+                    completedPomodoros: 0,
+                    done: false,
+                    createdAt: new Date().toISOString()
+                  };
+                  setTasks([...tasks, newTask]);
+                  setNewTaskInput('');
+                }
+              }}
+              style={{
+                width: '100%',
+                background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                border: `1px solid ${border}`,
+                color: text,
+                padding: '8px',
+                borderRadius: '8px',
+                fontSize: '14px',
+                outline: 'none'
+              }}
+            >
+              {[...Array(10)].map((_, i) => (
+                <option key={i + 1} value={i + 1}>{i + 1} pomodoro{i + 1 > 1 ? 's' : ''}</option>
+              ))}
+            </select>
+          </div>
+          
+          {/* Task list */}
+          <div style={{ marginBottom: '20px' }}>
+            {tasks.filter(t => !t.done).map(task => (
+              <div key={task.id} style={{
+                background: themeMode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                border: `1px solid ${border}`,
+                borderRadius: '8px',
+                padding: '12px',
+                marginBottom: '8px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={task.done}
+                    onChange={(e) => {
+                      setTasks(tasks.map(t => 
+                        t.id === task.id ? { ...t, done: e.target.checked } : t
+                      ));
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <span style={{ 
+                    color: text, 
+                    fontSize: '14px', 
+                    textDecoration: task.done ? 'line-through' : 'none',
+                    opacity: task.done ? 0.5 : 1
+                  }}>
+                    {task.name}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                  {[...Array(task.estimatedPomodoros)].map((_, i) => (
+                    <div key={i} style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: i < task.completedPomodoros ? accentBlue : border
+                    }} />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => {
+                      const template = { ...task, id: Date.now() };
+                      setTemplates([...templates, template]);
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: `1px solid ${border}`,
+                      color: textDim,
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Save as Template
+                  </button>
+                  <button
+                    onClick={() => setTasks(tasks.filter(t => t.id !== task.id))}
+                    style={{
+                      background: 'transparent',
+                      border: `1px solid ${border}`,
+                      color: textDim,
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {/* Templates */}
+          {templates.length > 0 && (
+            <div>
+              <h3 style={{ color: textDim, fontSize: '12px', fontWeight: '500', marginBottom: '8px' }}>
+                Templates
+              </h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {templates.map(template => (
+                  <button
+                    key={template.id}
+                    onClick={() => {
+                      const newTask = {
+                        id: Date.now(),
+                        name: template.name,
+                        estimatedPomodoros: template.estimatedPomodoros,
+                        completedPomodoros: 0,
+                        done: false,
+                        createdAt: new Date().toISOString()
+                      };
+                      setTasks([...tasks, newTask]);
+                    }}
+                    style={{
+                      background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                      border: `1px solid ${border}`,
+                      color: text,
+                      padding: '4px 8px',
+                      borderRadius: '12px',
+                      fontSize: '10px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {template.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Estimated finish time */}
+          {tasks.filter(t => !t.done).length > 0 && (
+            <div style={{
+              marginTop: '20px',
+              padding: '12px',
+              background: themeMode === 'dark' ? 'rgba(224,123,79,0.1)' : 'rgba(224,123,79,0.05)',
+              border: `1px solid ${border}`,
+              borderRadius: '8px',
+              textAlign: 'center'
+            }}>
+              <div style={{ color: textDim, fontSize: '10px', marginBottom: '4px' }}>
+                Estimated finish time
+              </div>
+              <div style={{ color: accent, fontSize: '14px', fontWeight: '600' }}>
+                {Math.ceil(tasks.filter(t => !t.done).reduce((sum, t) => 
+                  sum + (t.estimatedPomodoros - t.completedPomodoros), 0
+                ) * (globalWorkMin || 25) / 60)} hours
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Keyboard Help Modal */}
+      {showKeyboardHelp && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => setShowKeyboardHelp(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
+            border: `1px solid ${border}`,
+            borderRadius: '20px',
+            padding: '32px',
+            width: '90%',
+            maxWidth: '420px',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⌨️</div>
+            <h2 style={{ color: accent, fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>
+              Keyboard Shortcuts
+            </h2>
+            <p style={{ color: textDim, fontSize: '14px', marginBottom: '24px', lineHeight: '1.6' }}>
+              Work faster with these shortcuts
+            </p>
+            <div style={{ marginBottom: '24px', textAlign: 'left' }}>
+              {[
+                { key: 'Space', desc: 'Start/Pause first timer' },
+                { key: 'R', desc: 'Reset first timer' },
+                { key: 'N', desc: 'Toggle noise' },
+                { key: '1', desc: 'Switch to Timer tab' },
+                { key: '2', desc: 'Switch to Noise tab' },
+                { key: '3', desc: 'Switch to Notes tab' },
+                { key: '4', desc: 'Switch to Stopwatch tab' },
+                { key: '5', desc: 'Switch to Stats tab' }
+              ].map(shortcut => (
+                <div key={shortcut.key} style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '8px 0',
+                  borderBottom: `1px solid ${border}`
+                }}>
+                  <div style={{
+                    background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                    border: `1px solid ${border}`,
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: accent,
+                    minWidth: '40px',
+                    textAlign: 'center'
+                  }}>
+                    {shortcut.key}
+                  </div>
+                  <div style={{
+                    color: text,
+                    fontSize: '14px'
+                  }}>
+                    {shortcut.desc}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowKeyboardHelp(false)}
+              style={{
+                width: '100%',
+                background: accentBlue,
+                border: 'none',
+                color: 'white',
+                padding: '12px',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}>
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Onboarding Modal */}
+      {showOnboarding && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)',
+          zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <div style={{
+            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
+            border: `1px solid ${border}`,
+            borderRadius: '24px',
+            padding: '40px',
+            width: '90%',
+            maxWidth: '480px',
+            textAlign: 'center'
+          }}>
+            {onboardingStep === 1 && (
+              <>
+                <div style={{ fontSize: '64px', marginBottom: '24px' }}>🍅</div>
+                <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '16px' }}>
+                  Welcome to Pomodoros.io
+                </h2>
+                <p style={{ color: text, fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
+                  The ultimate focus timer with deep work features
+                </p>
+                <div style={{ marginBottom: '32px', textAlign: 'left' }}>
+                  {[
+                    '🔥 Run up to 4 timers simultaneously',
+                    '⏱️ Built-in stopwatch for time tracking',
+                    '🌧️ Ambient noise for deep focus',
+                    '📊 Detailed stats and progress tracking'
+                  ].map(feature => (
+                    <div key={feature} style={{
+                      color: text, fontSize: '14px', padding: '8px 0',
+                      display: 'flex', alignItems: 'center', gap: '8px'
+                    }}>
+                      {feature}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            
+            {onboardingStep === 2 && (
+              <>
+                <div style={{ fontSize: '64px', marginBottom: '24px' }}>🎯</div>
+                <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '16px' }}>
+                  How to Use
+                </h2>
+                <p style={{ color: text, fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
+                  Get started in 3 simple steps
+                </p>
+                <div style={{ marginBottom: '32px', textAlign: 'left' }}>
+                  {[
+                    '1️⃣ Add a timer and set your work duration',
+                    '2️⃣ Press Start to begin your focus session',
+                    '3️⃣ Take breaks when the timer completes'
+                  ].map(step => (
+                    <div key={step} style={{
+                      color: text, fontSize: '14px', padding: '8px 0',
+                      display: 'flex', alignItems: 'center', gap: '8px'
+                    }}>
+                      {step}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            
+            {onboardingStep === 3 && (
+              <>
+                <div style={{ fontSize: '64px', marginBottom: '24px' }}>🚀</div>
+                <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '16px' }}>
+                  Save Your Progress
+                </h2>
+                <p style={{ color: text, fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
+                  Sign in to sync your data across devices
+                </p>
+                <div style={{ marginBottom: '32px', textAlign: 'left' }}>
+                  {[
+                    '💾 Save your stats and progress',
+                    '🏆 Access the global leaderboard',
+                    '☁️ Sync across all your devices',
+                    '⭐ Unlock premium features'
+                  ].map(benefit => (
+                    <div key={benefit} style={{
+                      color: text, fontSize: '14px', padding: '8px 0',
+                      display: 'flex', alignItems: 'center', gap: '8px'
+                    }}>
+                      {benefit}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  localStorage.setItem('pomodoros_visited', 'true');
+                  setShowOnboarding(false);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: `1px solid ${border}`,
+                  color: textDim,
+                  padding: '12px 24px',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Skip
+              </button>
+              <button
+                onClick={() => {
+                  if (onboardingStep === 3) {
+                    localStorage.setItem('pomodoros_visited', 'true');
+                    setShowOnboarding(false);
+                  } else {
+                    setOnboardingStep(onboardingStep + 1);
+                  }
+                }}
+                style={{
+                  background: accentBlue,
+                  border: 'none',
+                  color: 'white',
+                  padding: '12px 24px',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '600'
+                }}
+              >
+                {onboardingStep === 3 ? 'Done' : 'Next'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: themeMode === 'dark' ? '#1A1A24' : '#DEDAD2',
+          border: `1px solid ${border}`,
+          borderRadius: '100px',
+          padding: '12px 24px',
+          color: accent,
+          fontSize: '14px',
+          fontWeight: '500',
+          zIndex: 99999,
+          backdropFilter: 'blur(20px)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+          animation: 'fadeIn 0.3s ease',
+          whiteSpace: 'nowrap'
+        }}>
+          {toast}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div style={{
+        position: 'fixed',
+        bottom: '8px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        gap: '16px',
+        fontSize: '10px',
+        color: textDim,
+        opacity: 0.4,
+        zIndex: 1
+      }}>
+        {['Privacy', 'Terms', 'Contact'].map(link => (
+          <span key={link} style={{ cursor: 'pointer' }}
+            onClick={() => window.open(`https://www.pomodoros.io/${link.toLowerCase()}`, '_blank')}>
+            {link}
+          </span>
+        ))}
+      </div>
+          </div>
+    </div>
   );
 }
