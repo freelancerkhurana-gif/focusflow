@@ -1,3425 +1,1828 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Monitor, Sun, Moon, Volume2, VolumeX, FileText, BarChart2 } from "lucide-react";
-import { supabase } from './supabase';
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { supabase } from './supabase'
 
-export default function Pomodoros() {
-  // Pomodoro Presets
-  const PRESETS = [
-    { label: '25/5', work: 25, break: 5 },
-    { label: '30/10', work: 30, break: 10 },
-    { label: '45/15', work: 45, break: 15 },
-  ];
+// ─── SVG RING COMPONENT ───────────────────────────────────────────────────────────
+const CIRC = 2 * Math.PI * 90
 
-  // State
-  const [tab, setTab] = useState("timer");
-  const [workMin, setWorkMin] = useState(25);
-  const [breakMin, setBreakMin] = useState(5);
-  const [phase, setPhase] = useState("work");
-  const [secsLeft, setSecsLeft] = useState(25 * 60);
-  const [running, setRunning] = useState(false);
-  const [noiseType, setNoiseType] = useState("brown");
-  const [noiseOn, setNoiseOn] = useState(false);
-  const [note, setNote] = useState(() => localStorage.getItem("pomodoros_note") || "");
-  const [volume, setVolume] = useState(0.4);
-  const [isMuted, setIsMuted] = useState(false);
-  const [themeMode, setThemeMode] = useState(
-  () => localStorage.getItem('pomodoros_theme') || 'dark'
-);
+function Ring({ secsLeft, total, color, glow, size, children }) {
+  const pct = total > 0 ? secsLeft / total : 1
+  const offset = CIRC * (1 - pct)
+  return (
+    <div style={{ position:'relative', width:size, height:size, flexShrink:0 }}>
+      <svg width={size} height={size} viewBox="0 0 200 200" style={{ position:'absolute', inset:0, transform:'rotate(-90deg)', filter: `drop-shadow(0 0 20px ${glow})` }}>
+        <circle cx="100" cy="100" r="90" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8"/>
+        <circle cx="100" cy="100" r="90" fill="none" stroke={glow} strokeWidth="12"
+          strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={offset}
+          style={{ filter:'blur(8px) drop-shadow(0 0 15px currentColor)', transition:'stroke-dashoffset 0.6s linear' }}/>
+        <circle cx="100" cy="100" r="90" fill="none" stroke={color} strokeWidth="7"
+          strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={offset}
+          style={{ transition:'stroke-dashoffset 0.6s linear' }}/>
+      </svg>
+      <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 70%)', borderRadius:'50%' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
 
-  // Stats state — stored in seconds for full precision, flushed on every pause
-  const [sessionsCompleted, setSessionsCompleted] = useState(
-    () => parseInt(localStorage.getItem("pomodoros_sessions") || "0", 10)
-  );
-  const [savedWorkSeconds, setSavedWorkSeconds] = useState(
-    () => parseInt(localStorage.getItem("pomodoros_work_seconds") || "0", 10)
-  );
-  const [savedBreakSeconds, setSavedBreakSeconds] = useState(
-    () => parseInt(localStorage.getItem("pomodoros_break_seconds") || "0", 10)
-  );
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const PHASE_COLORS = {
+  pomodoro:   '#BA4949',
+  shortBreak: '#38858A',
+  longBreak:  '#397097',
+}
 
-  // Live seconds for the currently-running segment (resets to 0 each time Start is pressed)
-  const [liveSeconds, setLiveSeconds] = useState(0);
+const NOISE_OPTIONS = [
+  { key: 'white',  label: 'White Noise' },
+  { key: 'pink',   label: 'Pink Noise'  },
+  { key: 'brown',  label: 'Brown Noise' },
+  { key: 'rain',   label: 'Rain'        },
+  { key: 'cafe',   label: 'Café'        },
+  { key: 'forest', label: 'Forest'      },
+]
 
-  // Multi-timer state
-  const [timers, setTimers] = useState([
-    { 
-      id: 1, 
-      name: 'Task 1', 
-      phase: 'work', 
-      secsLeft: 25 * 60, 
-      running: false,
-      cyclesCompleted: 0,
-      totalWorkSeconds: 0,
-      totalBreakSeconds: 0,
-      liveSeconds: 0,
-      workMin: 25,
-      breakMin: 5,
-      selectedPreset: '25/5'
+const WASH_COLORS = [
+  { label: 'Black',    bg: '#000000', fg: '#fff' },
+  { label: 'White',    bg: '#FFFFFF', fg: '#333' },
+  { label: 'Red',      bg: '#BA4949', fg: '#fff' },
+  { label: 'Teal',     bg: '#38858A', fg: '#fff' },
+  { label: 'Blue',     bg: '#397097', fg: '#fff' },
+  { label: 'Forest',   bg: '#2D5A2D', fg: '#fff' },
+  { label: 'Lavender', bg: '#9B89C4', fg: '#fff' },
+  { label: 'Gold',     bg: '#D4A017', fg: '#333' },
+  { label: 'Charcoal', bg: '#36454F', fg: '#fff' },
+]
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const fmtTime = (s) =>
+  `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+
+const fmtHMS = (s) => {
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sc = s % 60
+  return h > 0
+    ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sc).padStart(2,'0')}`
+    : `${String(m).padStart(2,'0')}:${String(sc).padStart(2,'0')}`
+}
+
+const calculateFocusScore = (
+  focusSecs,
+  completedCycles,
+  distractionsCount
+) => {
+  const focusPoints = Math.floor(focusSecs / 60)
+  const cycleBonus = completedCycles * 25
+  const distractionPenalty = distractionsCount * 15
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      focusPoints + cycleBonus - distractionPenalty
+    )
+  )
+}
+
+const getCurrentHour = () => {
+  return new Date().getHours()
+}
+
+const awardXP = (amount, setXp, setLevel) => {
+  setXp(prev => {
+    const newXP = prev + amount
+
+    const nextLevel =
+      Math.floor(newXP / 500) + 1
+
+    setLevel(nextLevel)
+
+    ls.set('pom_xp', newXP)
+    ls.set('pom_level', nextLevel)
+
+    return newXP
+  })
+}
+
+const addDistraction = (reason, setDistractions, showToast) => {
+  const item = {
+    id: Date.now(),
+    reason,
+    timestamp: new Date().toISOString(),
+  }
+
+  setDistractions(prev => {
+    const updated = [...prev, item]
+    ls.set('pom_distractions', updated)
+    return updated
+  })
+
+  showToast(`Distraction logged: ${reason}`)
+}
+
+const checkAchievements = (totalCycles, streak, totalFocusSecs, setAchievements) => {
+  const unlocked = []
+
+  if (totalCycles >= 10)
+    unlocked.push('10 Pomodoros')
+
+  if (totalCycles >= 50)
+    unlocked.push('Focus Machine')
+
+  if (streak >= 7)
+    unlocked.push('7 Day Streak')
+
+  if (totalFocusSecs >= 36000)
+    unlocked.push('10 Hour Club')
+
+  setAchievements(prev => {
+    const merged = [
+      ...new Set([...prev, ...unlocked]),
+    ]
+
+    ls.set('pom_achievements', merged)
+
+    return merged
+  })
+}
+
+const updateHeatmap = (seconds, setHeatmapData) => {
+  const today = new Date().toISOString().split('T')[0]
+
+  setHeatmapData(prev => {
+    const updated = {
+      ...prev,
+      [today]: (prev[today] || 0) + seconds
     }
-  ]);
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [newTimerName, setNewTimerName] = useState('');
-  const [editingTimerId, setEditingTimerId] = useState(null);
-  const [editingName, setEditingName] = useState('');
-  
-  // Stopwatch state
-  const [stopwatches, setStopwatches] = useState([
-    { id: 1, name: 'Task 1', elapsed: 0, running: false, laps: [] }
-  ]);
-  const stopwatchIntervalsRef = useRef({});
 
-  // Mobile detection
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    ls.set('pom_heatmap_data', updated)
+    return updated
+  })
+}
 
-  // Auth state
-  const [user, setUser] = useState(null);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
+const updateHourlyFocus = (seconds, setHourlyFocusData) => {
+  const hour = new Date().getHours()
 
-  // PWA Install state
-  const [installPrompt, setInstallPrompt] = useState(null);
-  const [showInstall, setShowInstall] = useState(false);
-
-  useEffect(() => {
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      setInstallPrompt(e);
-      setShowInstall(true);
-    });
-  }, []);
-
-  const handleInstall = async () => {
-    if (!installPrompt) return;
-    installPrompt.prompt();
-    const { outcome } = await installPrompt.userChoice;
-    if (outcome === 'accepted') setShowInstall(false);
-  };
-
-  // Settings state
-  const [settings, setSettings] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('pomodoros_settings') || '{}');
-      return {
-        workMin: saved.workMin || 25,
-        shortBreakMin: saved.shortBreakMin || 5,
-        longBreakMin: saved.longBreakMin || 15,
-        longBreakInterval: saved.longBreakInterval || 4,
-        soundEnabled: saved.soundEnabled !== false,
-        autoStartBreak: saved.autoStartBreak || false,
-        autoStartWork: saved.autoStartWork || false,
-        dailyGoalSeconds: saved.dailyGoalSeconds || 4 * 3600,
-        alarmSound: saved.alarmSound || 'bell',
-        browserNotifications: saved.browserNotifications !== false
-      };
-    } catch(e) {
-      return {
-        workMin: 25,
-        shortBreakMin: 5,
-        longBreakMin: 15,
-        longBreakInterval: 4,
-        soundEnabled: true,
-        autoStartBreak: false,
-        autoStartWork: false,
-        dailyGoalSeconds: 4 * 3600,
-        alarmSound: 'bell',
-        browserNotifications: true
-      };
+  setHourlyFocusData(prev => {
+    const updated = {
+      ...prev,
+      [hour]: (prev[hour] || 0) + seconds
     }
-  });
 
-  const [showSettings, setShowSettings] = useState(false);
-  const [globalWorkMin, setGlobalWorkMin] = useState(settings.workMin || 25);
-  const [globalBreakMin, setGlobalBreakMin] = useState(settings.shortBreakMin || 5);
-  const [globalLongBreakMin, setGlobalLongBreakMin] = useState(settings.longBreakMin || 15);
-  const [longBreakInterval, setLongBreakInterval] = useState(settings.longBreakInterval || 4);
-  const [soundEnabled, setSoundEnabled] = useState(settings.soundEnabled !== false);
-  const [alarmVolume, setAlarmVolume] = useState(settings.alarmVolume || 0.3);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(settings.browserNotifications !== false);
-  const [dailyGoal, setDailyGoal] = useState(settings.dailyGoalSeconds ? settings.dailyGoalSeconds / 3600 : 4);
-  const [autoStartBreak, setAutoStartBreak] = useState(settings.autoStartBreak || false);
-  const [autoStartWork, setAutoStartWork] = useState(settings.autoStartWork || false);
+    ls.set('pom_hourly_focus', updated)
+    return updated
+  })
+}
 
-  // Pro state
-  const [isPro, setIsPro] = useState(() => localStorage.getItem('pomodoros_pro') === 'true');
-  const [showUpgrade, setShowUpgrade] = useState(false);
+const generateInsights = (data) => {
+  const entries = Object.entries(data || {})
 
-  // Task management
-  const [tasks, setTasks] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('pomodoros_tasks') || '[]'); } catch(e) { return []; }
-  });
-  const [newTaskInput, setNewTaskInput] = useState('');
-  const [showTaskPanel, setShowTaskPanel] = useState(false);
+  if (!entries.length) return
 
-  // Task templates
-  const [templates, setTemplates] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('pomodoros_templates') || '[]'); } catch(e) { return []; }
-  });
+  const bestHour = entries.reduce((a, b) =>
+    Number(a[1]) > Number(b[1]) ? a : b
+  )
 
-  // Focus streak
-  const [streak, setStreak] = useState(() => parseInt(localStorage.getItem('pomodoros_streak') || '0'));
+  const insights = {
+    bestHour: bestHour[0],
+    focusMinutes: Math.round(bestHour[1] / 60),
+    generatedAt: new Date().toISOString()
+  }
 
-  // Keyboard help
-  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
+  setWeeklyInsights(insights)
+  ls.set('pom_weekly_insights', insights)
+}
 
-  // Active task and focus mode
-  const [activeTaskId, setActiveTaskId] = useState(null);
-  const [focusTimerId, setFocusTimerId] = useState(null);
+const getPlayerTitle = level => {
+  if (level >= 100) return 'Focus Emperor'
+  if (level >= 75) return 'Deep Work Legend'
+  if (level >= 50) return 'Focus Master'
+  if (level >= 35) return 'Elite Performer'
+  if (level >= 20) return 'Productivity Expert'
+  if (level >= 10) return 'Focus Warrior'
+  return 'Focus Beginner'
+}
 
-  // Alarm sound setting
-  const [alarmSound, setAlarmSound] = useState(settings.alarmSound || 'bell');
+const generateCoachMessage = (totalFocusSecs, totalCycles, streak, focusScore, distractions, setCoachMessages) => {
+  const messages = []
 
-  // Onboarding and toast
-  const [showOnboarding, setShowOnboarding] = useState(
-    () => !localStorage.getItem('pomodoros_visited')
-  );
-  const [onboardingStep, setOnboardingStep] = useState(1);
-  const [toast, setToast] = useState(null);
+  if (totalFocusSecs < 3600) {
+    messages.push(
+      'You have focused less than 1 hour today. Try completing 2 more sessions.'
+    )
+  }
 
-  // Refs
-  const timerRef = useRef(null);
-  const liveRef = useRef(null);
-  const audioCtxRef = useRef(null);
-  const gainRef = useRef(null);
-  const noiseNodeRef = useRef(null);
-  const phaseRef = useRef("work");
-  phaseRef.current = phase;
+  if (totalCycles >= 8) {
+    messages.push(
+      'Excellent consistency today. You are entering deep work territory.'
+    )
+  }
 
-  // Timer intervals ref for multi-timer system
-  const timerIntervalsRef = useRef({});
+  if (streak >= 7) {
+    messages.push(
+      `Your ${streak} day streak is becoming a powerful habit.` 
+    )
+  }
 
-  // Ref so flushLiveSeconds can read latest value without stale closure
-  const liveSecondsRef = useRef(0);
-  liveSecondsRef.current = liveSeconds;
+  if (focusScore >= 90) {
+    messages.push(
+      'Outstanding focus score. Keep protecting your attention.'
+    )
+  }
 
-  // Track previous running state to detect pause
-  const prevRunningRef = useRef(false);
+  if (distractions.length > 5) {
+    messages.push(
+      'Distractions are increasing. Consider enabling Focus Mode.'
+    )
+  }
 
-  // Constants
-  const WASH_MODES = [
-    { label: "BLACK", bg: "#000000", text: "#ffffff" },
-    { label: "WHITE", bg: "#FFFFFF", text: "#000000" },
-    { label: "RED", bg: "#FF0000", text: "#ffffff" },
-    { label: "SOFT MINT", bg: "#E8F5E8", text: "#2D5A2D" },
-    { label: "OCEAN BLUE", bg: "#0077BE", text: "#ffffff" },
-    { label: "SUNSET", bg: "#FF6B6B", text: "#ffffff" },
-    { label: "FOREST", bg: "#2D5A2D", text: "#ffffff" },
-    { label: "LAVENDER", bg: "#E6E6FA", text: "#4B0082" },
-    { label: "GOLD", bg: "#FFD700", text: "#333333" },
-    { label: "CHARCOAL", bg: "#36454F", text: "#ffffff" }
-  ];
+  if (!messages.length) {
+    messages.push(
+      'Keep building momentum. Small wins compound quickly.'
+    )
+  }
 
-  const NOISE_TYPES = ["white", "pink", "brown", "rain", "cafe", "forest"];
+  setCoachMessages(messages)
 
-  // Auth useEffect
+  ls.set('pom_coach_messages', messages)
+}
+
+const checkBadges = (totalCycles, streak, focusScore, setBadges) => {
+  const earned = []
+
+  if (totalCycles >= 10)
+    earned.push('🍅 Pomodoro Rookie')
+
+  if (totalCycles >= 50)
+    earned.push('🔥 Focus Machine')
+
+  if (totalCycles >= 100)
+    earned.push('⚡ Deep Worker')
+
+  if (streak >= 7)
+    earned.push('🏆 Consistency Master')
+
+  if (streak >= 30)
+    earned.push('👑 Discipline King')
+
+  if (focusScore >= 95)
+    earned.push('🎯 Laser Focus')
+
+  setBadges(prev => {
+    const merged = [...new Set([...prev, ...earned])]
+
+    ls.set('pom_badges', merged)
+
+    return merged
+  })
+}
+
+const buildDailyReview = (totalFocusSecs, totalCycles, focusScore, streak, setDailyReview) => {
+  const review = {
+    focusHours: (
+      totalFocusSecs / 3600
+    ).toFixed(1),
+
+    cycles: totalCycles,
+
+    score: focusScore,
+
+    streak,
+
+    recommendation:
+      focusScore < 70
+        ? 'Reduce distractions and complete more sessions.'
+        : 'Maintain your current momentum.'
+  }
+
+  setDailyReview(review)
+
+  ls.set('pom_daily_review', review)
+}
+
+const ls = {
+  get: (k, def) => { try { const v = localStorage.getItem(k); return v !== null ? JSON.parse(v) : def } catch { return def } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} },
+}
+
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+export default function App() {
+
+  // ── TAB ──
+  const [tab, setTab] = useState('timer') // timer | sounds | notes | stopwatch | stats
+
+  // ── TIMER MODE ── (which phase preset is selected in the top nav)
+  const [timerMode, setTimerMode] = useState('pomodoro') // pomodoro | shortBreak | longBreak
+  const [globalMode, setGlobalMode] = useState('pomodoro')
+
+  // ── SETTINGS ──
+  const [settings, setSettings] = useState(() => ls.get('pom_settings', {
+    pomodoroMin: 25, shortBreakMin: 5, longBreakMin: 15,
+    longBreakEvery: 4, autoStartBreaks: false, autoStartPomodoros: false,
+    alarmSound: true, browserNotifs: true,
+    dailyGoalHours: 4,
+  }))
+  const [showSettings, setShowSettings] = useState(false)
+  const [tempSettings, setTempSettings] = useState(settings)
+
+  // ── ADVANCED ANALYTICS ──
+  const [sessionHistory, setSessionHistory] = useState(() =>
+    ls.get('pom_session_history', [])
+  )
+  const [focusScore, setFocusScore] = useState(() =>
+    ls.get('pom_focus_score', 0)
+  )
+  const [distractions, setDistractions] = useState(() =>
+    ls.get('pom_distractions', [])
+  )
+  const [dailyStats, setDailyStats] = useState(() =>
+    ls.get('pom_daily_stats', {})
+  )
+  const [productivityHeatmap, setProductivityHeatmap] = useState(() =>
+    ls.get('pom_heatmap', {})
+  )
+  const [achievements, setAchievements] = useState(() =>
+    ls.get('pom_achievements', [])
+  )
+  const [level, setLevel] = useState(() =>
+    ls.get('pom_level', 1)
+  )
+  const [xp, setXp] = useState(() =>
+    ls.get('pom_xp', 0)
+  )
+  const [heatmapData, setHeatmapData] = useState(() =>
+    ls.get('pom_heatmap_data', {})
+  )
+  const [hourlyFocusData, setHourlyFocusData] = useState(() =>
+    ls.get('pom_hourly_focus', {})
+  )
+  const [weeklyInsights, setWeeklyInsights] = useState(() =>
+    ls.get('pom_weekly_insights', {})
+  )
+  const [coachMessages, setCoachMessages] = useState(() =>
+    ls.get('pom_coach_messages', [])
+  )
+  const [dailyReview, setDailyReview] = useState(() =>
+    ls.get('pom_daily_review', null)
+  )
+  const [badges, setBadges] = useState(() =>
+    ls.get('pom_badges', [])
+  )
+  const [playerTitle, setPlayerTitle] = useState(() =>
+    ls.get('pom_player_title', 'Focus Beginner')
+  )
+
+  // ── THEME ──
+
+  // ── MULTI TIMERS ──
+  const makeTimer = (id, num) => ({
+    id, num,
+    name: `Timer ${num}`,
+    task: '',
+    mode: 'pomodoro',
+    secsLeft: settings.pomodoroMin * 60,
+    totalSecs: settings.pomodoroMin * 60,
+    running: false,
+    cyclesDone: 0,
+    totalFocusSecs: 0,
+    totalBreakSecs: 0,
+  })
+  const [timers, setTimers] = useState(() => [makeTimer(1, 1)])
+  const [editingId, setEditingId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const timerRefs = useRef({})   // id → intervalId
+
+  // ── STOPWATCHES ──
+  const makeSW = (id, num) => ({ id, num, name: `Stopwatch ${num}`, elapsed: 0, running: false, laps: [] })
+  const [stopwatches, setStopwatches] = useState(() => [makeSW(1, 1)])
+  const swRefs = useRef({})
+
+  // ── TASKS ──
+  const [tasks, setTasks] = useState(() => ls.get('pom_tasks', []))
+  const [newTask, setNewTask] = useState('')
+  const [newTaskEst, setNewTaskEst] = useState(1)
+  const [activeTaskId, setActiveTaskId] = useState(null)
+  const [showTaskMenu, setShowTaskMenu] = useState(null)
+  const [templates, setTemplates] = useState(() => ls.get('pom_templates', []))
+
+  // ── AMBIENT NOISE ──
+  const [noiseKey, setNoiseKey] = useState('brown')
+  const [noiseOn, setNoiseOn] = useState(false)
+  const [volume, setVolume] = useState(0.4)
+  const audioCtx = useRef(null)
+  const gainNode = useRef(null)
+  const noiseNode = useRef(null)
+
+  // ── NOTES ──
+  const [note, setNote] = useState(() => ls.get('pom_note', ''))
+
+  // ── STREAK ──
+  const [streak, setStreak] = useState(() => ls.get('pom_streak', 0))
+
+  // ── SUPABASE AUTH ──
+  const [user, setUser] = useState(null)
+  const [showLeaderboard, setShowLeaderboard] = useState(false)
+  const [leaderboard, setLeaderboard] = useState([])
+  const [lbLoading, setLbLoading] = useState(false)
+
+  // ── PRO ──
+  const [isPro, setIsPro] = useState(() => ls.get('pom_pro', false))
+  const [showUpgrade, setShowUpgrade] = useState(false)
+
+  // ── UI ──
+  const [toast, setToast] = useState(null)
+  const toastTimer = useRef(null)
+  const [showKeyHelp, setShowKeyHelp] = useState(false)
+  const [showOnboard, setShowOnboard] = useState(() => !ls.get('pom_visited', false))
+  const [onboardStep, setOnboardStep] = useState(1)
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  const [installPrompt, setInstallPrompt] = useState(null)
+
+  // ── THEME: background changes with timerMode ──
+  const bgColor = PHASE_COLORS[timerMode] || PHASE_COLORS.pomodoro
+  const accentColor = bgColor
+  const meshOpacity = 1
+  const isDark = false
+  const textMain = '#fff'
+  const textDim = 'rgba(255,255,255,0.7)'
+  const textFaint = 'rgba(255,255,255,0.4)'
+  const surfBg = 'rgba(0,0,0,0.18)'
+  const borderCol = 'rgba(255,255,255,0.12)'
+
+  // ─── DERIVED ─────────────────────────────────────────────────────────────────
+  const totalFocusSecs = (timers || []).reduce((s, t) => s + (t.totalFocusSecs || 0), 0)
+  const totalBreakSecs = (timers || []).reduce((s, t) => s + (t.totalBreakSecs || 0), 0)
+  const totalCycles    = (timers || []).reduce((s, t) => s + (t.cyclesDone || 0), 0)
+  const activeTask     = (tasks || []).find(t => t.id === activeTaskId)
+  const pendingTasks   = (tasks || []).filter(t => !t.done)
+
+  // ─── SUPABASE ────────────────────────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) syncStatsToCloud(session.user.id);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        saveUserProfile(session.user);
-        syncStatsToCloud(session.user.id);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+      setUser(session?.user ?? null)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null)
+      if (session?.user) upsertProfile(session.user)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
 
-  // Global Design System Colors
-  const bg = themeMode === "dark" ? "#0A0A0F" : "#E8E4DC";
-  const surface = themeMode === "dark" ? "#111118" : "#DEDAD2";
-  const surfaceHover = themeMode === "dark" ? "#1A1A24" : "#D4D0C8";
-  const border = themeMode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.07)";
-  const borderHover = themeMode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.12)";
-  const text = themeMode === "dark" ? "#EDEDED" : "#1E1A14";
-  const textDim = themeMode === "dark" ? "rgba(237,237,237,0.4)" : "rgba(30,26,20,0.45)";
-  const accent = themeMode === "dark" ? "#EDEDED" : "#1E1A14";
-  const accentBlue = "#E07B4F";
-  const accentGreen = "#4FA8E0";
+  const signIn = () => supabase.auth.signInWithOAuth({
+    provider: 'google', options: { redirectTo: window.location.origin }
+  })
+  const signOut = () => { supabase.auth.signOut(); setUser(null) }
 
-  // Format time
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Dynamic sizing functions
-  const getGridStyle = () => {
-    if (timers.length === 1) return {
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: 'calc(100vh - 110px)',
-      padding: '16px'
-    };
-    if (timers.length === 2) return {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '10px',
-      height: 'calc(100vh - 110px)',
-      maxHeight: 'calc(100vh - 110px)',
-      padding: '10px 16px',
-      boxSizing: 'border-box',
-      overflow: 'hidden'
-    };
-    return {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gridTemplateRows: '1fr 1fr',
-      gap: '10px',
-      height: 'calc(100vh - 110px)',
-      maxHeight: 'calc(100vh - 110px)',
-      padding: '10px 16px',
-      boxSizing: 'border-box',
-      overflow: 'hidden'
-    };
-  };
-
-  const getCardStyle = () => {
-    if (timers.length === 1) return {
-      width: '100%',
-      maxWidth: '500px',
-      padding: '32px',
-      countdownSize: '96px',
-      buttonPadding: '14px 28px',
-      buttonFontSize: '15px'
-    };
-    if (timers.length === 2) return {
-      padding: '24px',
-      countdownSize: '72px',
-      buttonPadding: '12px 20px',
-      buttonFontSize: '14px'
-    };
-    return {
-      padding: '12px',
-      countdownSize: '48px',
-      buttonPadding: '7px 12px',
-      buttonFontSize: '12px'
-    };
-  };
-
-  // ─── Derived stats ─────────────────────────────────────────────────────────────
-  // Aggregate from all timers
-  const totalWorkSecs = timers.reduce((sum, t) => sum + (t.totalWorkSeconds || 0), 0) + (phase === 'work' ? liveSeconds : 0);
-  const totalBreakSecs = timers.reduce((sum, t) => sum + (t.totalBreakSeconds || 0), 0) + (phase === 'break' ? liveSeconds : 0);
-  const totalCycles = timers.reduce((sum, t) => sum + (t.cyclesCompleted || 0), 0);
-  const focusScore = Math.min(Math.round((totalWorkSecs / (100 * 60)) * 100), 100);
-
-  // ─── Flush live seconds into saved totals ─────────────────────────────────────
-  // Called on every pause and reset so no time is ever lost
-  const flushLiveSeconds = useCallback(() => {
-    const live = liveSecondsRef.current;
-    if (live === 0) return;
-    if (phaseRef.current === "work") {
-      setSavedWorkSeconds((prev) => {
-        const next = prev + live;
-        localStorage.setItem("pomodoros_work_seconds", next);
-        return next;
-      });
-    } else {
-      setSavedBreakSeconds((prev) => {
-        const next = prev + live;
-        localStorage.setItem("pomodoros_break_seconds", next);
-        return next;
-      });
-    }
-    setLiveSeconds(0);
-  }, []);
-
-  // ─── Main countdown timer ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!running) {
-      clearInterval(timerRef.current);
-      return;
-    }
-
-    timerRef.current = setInterval(() => {
-      setSecsLeft((s) => {
-        if (s <= 1) {
-          clearInterval(timerRef.current);
-          clearInterval(liveRef.current);
-
-          // Flush live time then record the completed session
-          const live = liveSecondsRef.current;
-          if (phaseRef.current === "work") {
-            setSavedWorkSeconds((prev) => {
-              const next = prev + live;
-              localStorage.setItem("pomodoros_work_seconds", next);
-              return next;
-            });
-            setSessionsCompleted((prev) => {
-              const n = prev + 1;
-              localStorage.setItem("pomodoros_sessions", n);
-              return n;
-            });
-          } else {
-            setSavedBreakSeconds((prev) => {
-              const next = prev + live;
-              localStorage.setItem("pomodoros_break_seconds", next);
-              return next;
-            });
-          }
-          setLiveSeconds(0);
-
-          const nextPhase = phaseRef.current === "work" ? "break" : "work";
-          setPhase(nextPhase);
-          setRunning(false);
-          return nextPhase === "work" ? workMin * 60 : breakMin * 60;
-        }
-        return s - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timerRef.current);
-  }, [running, workMin, breakMin]);
-
-  // ─── Live ticker ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    clearInterval(liveRef.current);
-    if (!running) return;
-    liveRef.current = setInterval(() => {
-      setLiveSeconds((s) => s + 1);
-    }, 1000);
-    return () => clearInterval(liveRef.current);
-  }, [running]);
-
-  // ─── Detect pause: flush live seconds into saved totals immediately ───────────
-  useEffect(() => {
-    if (prevRunningRef.current && !running) {
-      flushLiveSeconds();
-    }
-    prevRunningRef.current = running;
-  }, [running, flushLiveSeconds]);
-
-  // ─── Reset ────────────────────────────────────────────────────────────────────
-  const resetGlobalTimer = useCallback((newPhase = phase, newWorkMin = workMin, newBreakMin = breakMin) => {
-    clearInterval(timerRef.current);
-    clearInterval(liveRef.current);
-    flushLiveSeconds();
-    setRunning(false);
-    setSecsLeft(newPhase === "work" ? newWorkMin * 60 : newBreakMin * 60);
-    setPhase(newPhase);
-    setLiveSeconds(0);
-  }, [phase, workMin, breakMin, flushLiveSeconds]);
-
-  // ─── Clear all stats ──────────────────────────────────────────────────────────
-  const clearStats = useCallback(() => {
-    setSavedWorkSeconds(0);
-    setSavedBreakSeconds(0);
-    setSessionsCompleted(0);
-    setLiveSeconds(0);
-    localStorage.removeItem("pomodoros_work_seconds");
-    localStorage.removeItem("pomodoros_break_seconds");
-    localStorage.removeItem("pomodoros_sessions");
-    setTimers(prev => prev.map(t => ({
-      ...t,
-      totalWorkSeconds: 0,
-      totalBreakSeconds: 0,
-      cyclesCompleted: 0
-    })));
-    // Clear stopwatch stats
-    setStopwatches(prev => prev.map(sw => ({
-      ...sw,
-      elapsed: 0,
-      running: false,
-      laps: []
-    })));
-  }, []);
-
-  // ─── Export CSV ─────────────────────────────────────────────────────────────
-  const exportCSV = () => {
-    const rows = [
-      ['Task Name', 'Work Time (MM:SS)', 'Break Time (MM:SS)', 'Cycles Completed', 'Date'],
-      ...timers.map(t => [
-        t.name,
-        formatTime(t.totalWorkSeconds || 0),
-        formatTime(t.totalBreakSeconds || 0),
-        t.cyclesCompleted || 0,
-        new Date().toLocaleDateString()
-      ]),
-      ['', '', '', '', ''],
-      ['TOTALS', formatTime(totalWorkSecs), formatTime(totalBreakSecs), totalCycles, ''],
-      ['', '', '', '', ''],
-      ['STOPWATCH SESSIONS', '', '', '', ''],
-      ['Stopwatch Name', 'Elapsed Time', 'Laps', '', 'Date'],
-      ...stopwatches.filter(sw => sw.elapsed > 0).map(sw => [
-        sw.name,
-        formatStopwatchTime(sw.elapsed),
-        sw.laps.length,
-        '',
-        new Date().toLocaleDateString()
-      ])
-    ];
-    const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pomodoros-${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // ─── Share on X ─────────────────────────────────────────────────────────────
-  const shareOnX = () => {
-    const runningCount = timers.length;
-    const totalCyclesCount = timers.reduce((sum, t) => sum + (t.cyclesCompleted || 0), 0);
-    const focusTime = formatTime(totalWorkSecs);
-    const tweet = `Just crushed my deep work goals on pomodoros.io! 🚀\n\n⏱️ Total focus time: ${focusTime}\n🔥 Timers tracked: ${runningCount}\n✅ Cycles completed: ${totalCyclesCount}\n\nFree multi timer for deep work 👇\nhttps://www.pomodoros.io`;
-    window.open(
-      'https://x.com/intent/tweet?text=' + encodeURIComponent(tweet),
-      '_blank',
-      'noopener,noreferrer'
-    );
-  };
-
-  
-  // ─── Multi-timer management functions ───────────────────────────────────────
-  const addTimer = useCallback(() => {
-    if (!isPro && timers.length >= 1) {
-      setShowUpgrade(true);
-      return;
-    }
-    setTimers(prev => {
-      if (prev.length >= 4) return prev;
-      
-      const newNumber = prev.length + 1;
-      const newTimer = {
-        id: Date.now(),
-        name: `Task ${newNumber}`,
-        phase: 'work',
-        secsLeft: 25 * 60,
-        running: false,
-        cyclesCompleted: 0,
-        totalWorkSeconds: 0,
-        totalBreakSeconds: 0,
-        liveSeconds: 0,
-        workMin: 25,
-        breakMin: 5,
-        longBreakMin: 15,
-        selectedPreset: '25/5'
-      };
-      
-      return [...prev, newTimer];
-    });
-  }, [isPro, timers.length]);
-
-  const startTimer = useCallback((id) => {
-    if (timerIntervalsRef.current[id]) return;
-    updateStreak();
-    timerIntervalsRef.current[id] = setInterval(() => {
-      setTimers(prev => prev.map(t => {
-        if (t.id !== id) return t;
-        if (t.secsLeft <= 1) {
-          clearInterval(timerIntervalsRef.current[id]);
-          delete timerIntervalsRef.current[id];
-          const nextPhase = t.phase === 'work' ? 'break' : 'work';
-          const isLongBreak = t.phase === 'work' && ((t.cyclesCompleted || 0) + 1) % 4 === 0;
-          const nextSecs = nextPhase === 'work' ? t.workMin * 60 : (isLongBreak ? t.longBreakMin * 60 : t.breakMin * 60);
-          return { 
-            ...t, 
-            running: false, 
-            phase: nextPhase, 
-            secsLeft: nextSecs, 
-            cyclesCompleted: (t.cyclesCompleted || 0) + (t.phase === 'work' ? 1 : 0),
-            totalWorkSeconds: t.phase === 'work' ? t.totalWorkSeconds + t.liveSeconds + 1 : t.totalWorkSeconds,
-            totalBreakSeconds: t.phase === 'break' ? t.totalBreakSeconds + t.liveSeconds + 1 : t.totalBreakSeconds,
-            liveSeconds: 0,
-            isLongBreak: nextPhase === 'break' && isLongBreak
-          };
-        }
-        const updatedTimer = { ...t, secsLeft: t.secsLeft - 1 };
-        if (t.secsLeft <= 1) {
-          playCompletionSound();
-          showNotification(t.name || 'Timer', t.phase === 'work');
-          if (t.phase === 'work') {
-            showConfetti();
-            showToast(quotes[Math.floor(Math.random() * quotes.length)]);
-          }
-        }
-        if (t.phase === 'work') {
-          updatedTimer.totalWorkSeconds = t.totalWorkSeconds + 1;
-          updatedTimer.liveSeconds = t.liveSeconds + 1;
-        } else {
-          updatedTimer.totalBreakSeconds = t.totalBreakSeconds + 1;
-          updatedTimer.liveSeconds = t.liveSeconds + 1;
-        }
-        return updatedTimer;
-      }));
-    }, 1000);
-  }, []);
-
-  const pauseTimer = useCallback((id) => {
-    clearInterval(timerIntervalsRef.current[id]);
-    delete timerIntervalsRef.current[id];
-    setTimers(prev => prev.map(t => {
-      if (t.id === id) {
-        const updatedTimer = { ...t, running: false };
-        if (t.phase === 'work') {
-          updatedTimer.totalWorkSeconds = t.totalWorkSeconds + t.liveSeconds;
-        } else {
-          updatedTimer.totalBreakSeconds = t.totalBreakSeconds + t.liveSeconds;
-        }
-        updatedTimer.liveSeconds = 0;
-        return updatedTimer;
-      }
-      return t;
-    }));
-  }, []);
-
-  const resetTimer = useCallback((id) => {
-    clearInterval(timerIntervalsRef.current[id]);
-    delete timerIntervalsRef.current[id];
-    setTimers(prev => prev.map(t => 
-      t.id === id ? { 
-        ...t, 
-        running: false, 
-        phase: 'work', 
-        secsLeft: t.workMin * 60,
-        liveSeconds: 0
-      } : t
-    ));
-  }, []);
-
-  const deleteTimer = useCallback((id) => {
-    clearInterval(timerIntervalsRef.current[id]);
-    delete timerIntervalsRef.current[id];
-    setTimers(prev => prev.filter(t => t.id !== id));
-  }, []);
-
-  const togglePhase = useCallback((id, newPhase) => {
-    clearInterval(timerIntervalsRef.current[id]);
-    delete timerIntervalsRef.current[id];
-    setTimers(prev => prev.map(t => {
-      if (t.id === id) {
-        const updatedTimer = {
-          ...t, 
-          running: false, 
-          phase: newPhase,
-          secsLeft: newPhase === 'work' ? t.workMin * 60 : t.breakMin * 60,
-          liveSeconds: 0
-        };
-        if (t.phase === 'work') {
-          updatedTimer.totalWorkSeconds = t.totalWorkSeconds + t.liveSeconds;
-        } else {
-          updatedTimer.totalBreakSeconds = t.totalBreakSeconds + t.liveSeconds;
-        }
-        return updatedTimer;
-      }
-      return t;
-    }));
-  }, []);
-
-  const toggleTimerRunning = useCallback((id) => {
-    setTimers(prev => prev.map(t => {
-      if (t.id === id) {
-        if (t.running) {
-          pauseTimer(id);
-        } else {
-          startTimer(id);
-          return { ...t, running: true };
-        }
-        return { ...t, running: false };
-      }
-      return t;
-    }));
-  }, [pauseTimer, startTimer]);
-
-  const updateTimer = useCallback((id, updates) => {
-    setTimers(prev => prev.map(timer => 
-      timer.id === id ? { ...timer, ...updates } : timer
-    ));
-  }, []);
-
-  const startEditingTimer = useCallback((id, currentName) => {
-    setEditingTimerId(id);
-    setEditingName(currentName);
-  }, []);
-
-  const saveTimerName = useCallback((id) => {
-    if (editingName.trim()) {
-      updateTimer(id, { name: editingName.trim() });
-    }
-    setEditingTimerId(null);
-    setEditingName('');
-  }, [editingName, updateTimer]);
-
-  // Stopwatch functions
-  const startStopwatch = useCallback((id) => {
-    if (stopwatchIntervalsRef.current[id]) return;
-    const startTime = Date.now();
-    setStopwatches(prev => {
-      const sw = prev.find(s => s.id === id);
-      const offset = sw ? sw.elapsed : 0;
-      stopwatchIntervalsRef.current[id] = setInterval(() => {
-        setStopwatches(p => p.map(s => s.id === id
-          ? { ...s, elapsed: offset + Math.floor((Date.now() - startTime) / 1000) }
-          : s
-        ));
-      }, 1000);
-      return prev.map(s => s.id === id ? { ...s, running: true } : s);
-    });
-  }, []);
-
-  const pauseStopwatch = useCallback((id) => {
-    clearInterval(stopwatchIntervalsRef.current[id]);
-    delete stopwatchIntervalsRef.current[id];
-    setStopwatches(prev => prev.map(s => s.id === id ? { ...s, running: false } : s));
-  }, []);
-
-  const resetStopwatch = useCallback((id) => {
-    clearInterval(stopwatchIntervalsRef.current[id]);
-    delete stopwatchIntervalsRef.current[id];
-    setStopwatches(prev => prev.map(s =>
-      s.id === id ? { ...s, elapsed: 0, running: false, laps: [] } : s
-    ));
-  }, []);
-
-  const lapStopwatch = useCallback((id) => {
-    setStopwatches(prev => prev.map(s => {
-      if (s.id !== id) return s;
-      const lapTime = s.elapsed;
-      const prevLap = s.laps.length > 0 ? s.laps[s.laps.length - 1].total : 0;
-      return {
-        ...s,
-        laps: [...s.laps, {
-          number: s.laps.length + 1,
-          split: lapTime - prevLap,
-          total: lapTime
-        }]
-      };
-    }));
-  }, []);
-
-  const deleteStopwatch = useCallback((id) => {
-    clearInterval(stopwatchIntervalsRef.current[id]);
-    delete stopwatchIntervalsRef.current[id];
-    setStopwatches(prev => prev.filter(s => s.id !== id));
-  }, []);
-
-  const addStopwatch = useCallback(() => {
-    setStopwatches(prev => {
-      if (prev.length >= 4) return prev;
-      const newNumber = prev.length + 1;
-      return [...prev, {
-        id: Date.now(),
-        name: `Task ${newNumber}`,
-        elapsed: 0,
-        running: false,
-        laps: []
-      }];
-    });
-  }, []);
-
-  // Format stopwatch time as HH:MM:SS
-  const formatStopwatchTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-    return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-  };
-
-  // Auth functions
-  const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin }
-    });
-  };
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-  };
-
-  // Auth useEffect with redirect handling
-  useEffect(() => {
-    // Handle OAuth redirect
-    const hashParams = new URLSearchParams(window.location.hash.slice(1));
-    if (hashParams.get('access_token')) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session) {
-          setUser(session.user);
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-      });
-    }
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        setUser(session.user);
-        saveUserProfile(session.user);
-        showToast(`Welcome back, ${session.user.user_metadata?.full_name?.split(' ')[0] || 'friend'}! 👋`);
-      }
-      if (event === 'SIGNED_OUT') {
-        setUser(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const saveUserProfile = async (user) => {
+  const upsertProfile = async (u) => {
     await supabase.from('profiles').upsert({
-      id: user.id,
-      username: user.user_metadata?.full_name || user.email?.split('@')[0],
-      avatar_url: user.user_metadata?.avatar_url
-    }, { onConflict: 'id' });
-  };
+      id: u.id,
+      username: u.user_metadata?.full_name || u.email?.split('@')[0],
+      avatar_url: u.user_metadata?.avatar_url,
+    }, { onConflict: 'id' })
+  }
 
-  const syncStatsToCloud = async (userId) => {
-    const totalWork = timers.reduce((sum, t) => sum + (t.totalWorkSeconds || 0), 0);
-    const totalBreak = timers.reduce((sum, t) => sum + (t.totalBreakSeconds || 0), 0);
-    const cycles = timers.reduce((sum, t) => sum + (t.cyclesCompleted || 0), 0);
-    if (totalWork === 0) return;
+  const syncToCloud = async () => {
+    if (!user) return
     await supabase.from('focus_sessions').insert({
-      user_id: userId,
-      total_work_seconds: totalWork,
-      total_break_seconds: totalBreak,
-      total_cycles: cycles,
-      session_date: new Date().toISOString().split('T')[0]
-    });
-  };
+      user_id: user.id,
+      total_work_seconds: totalFocusSecs,
+      total_break_seconds: totalBreakSecs,
+      total_cycles: totalCycles,
+      session_date: new Date().toISOString().split('T')[0],
+    })
+    showToast('Stats synced to cloud ☁️')
+  }
 
-  const fetchLeaderboard = async () => {
-    setLoadingLeaderboard(true);
-    const { data, error } = await supabase
+  const loadLeaderboard = async () => {
+    setLbLoading(true)
+    const { data } = await supabase
       .from('weekly_leaderboard')
-      .select('*');
-    if (!error) setLeaderboard(data || []);
-    setLoadingLeaderboard(false);
-  };
+      .select('*')
+      .order('total_focus_seconds', { ascending: false })
+      .limit(100)
+    setLeaderboard(data || [])
+    setLbLoading(false)
+  }
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyboard = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.code === 'Space') {
-        e.preventDefault();
-        const firstTimer = timers[0];
-        if (firstTimer) toggleTimerRunning(firstTimer.id);
-      }
-      if (e.code === 'KeyR' && !e.ctrlKey) {
-        const firstTimer = timers[0];
-        if (firstTimer) resetTimer(firstTimer.id);
-      }
-      if (e.code === 'KeyN') setNoiseOn(prev => !prev);
-      if (e.code === 'Digit1') setTab('timer');
-      if (e.code === 'Digit2') setTab('noise');
-      if (e.code === 'Digit3') setTab('note');
-      if (e.code === 'Digit4') setTab('stopwatch');
-      if (e.code === 'Digit5') setTab('stats');
-    };
-    window.addEventListener('keydown', handleKeyboard);
-    return () => window.removeEventListener('keydown', handleKeyboard);
-  }, [timers, toggleTimerRunning, resetTimer]);
+  // ─── TOAST ───────────────────────────────────────────────────────────────────
+  const showToast = useCallback((msg) => {
+    setToast(msg)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 3500)
+  }, [])
 
-  // Auto-save tasks and templates
-  useEffect(() => {
-    localStorage.setItem('pomodoros_tasks', JSON.stringify(tasks));
-  }, [tasks]);
+  // ─── STREAK ──────────────────────────────────────────────────────────────────
+  const bumpStreak = useCallback(() => {
+    const today = new Date().toDateString()
+    const lastDate = ls.get('pom_lastDate', '')
+    if (lastDate === today) return
+    const yest = new Date(Date.now() - 86400000).toDateString()
+    const next = lastDate === yest ? streak + 1 : 1
+    setStreak(next)
+    ls.set('pom_streak', next)
+    ls.set('pom_lastDate', today)
+    if (next > 1) showToast(`🔥 ${next} day streak!`)
+  }, [streak, showToast])
 
-  useEffect(() => {
-    localStorage.setItem('pomodoros_templates', JSON.stringify(templates));
-  }, [templates]);
-
-  useEffect(() => {
-    localStorage.setItem('pomodoros_settings', JSON.stringify(settings));
-  }, [settings]);
-
-  // Save theme preference
-  useEffect(() => {
-    localStorage.setItem('pomodoros_theme', themeMode);
-  }, [themeMode]);
-
-  // Clean up intervals on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(timerIntervalsRef.current).forEach(interval => clearInterval(interval));
-      Object.values(stopwatchIntervalsRef.current).forEach(interval => clearInterval(interval));
-    };
-  }, []);
-
-  // Audio functions
-  const createNoiseNode = useCallback((ctx, type) => {
-    const bufferSize = ctx.sampleRate * 4;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    
-    if (type === "white") {
-      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-    } else if (type === "brown") {
-      let last = 0;
-      for (let i = 0; i < bufferSize; i++) {
-        const w = Math.random() * 2 - 1;
-        data[i] = (last + 0.02 * w) / 1.02;
-        last = data[i];
-        data[i] *= 3.5;
-      }
-    } else if (type === 'rain') {
-      // White noise with low-pass filter for rain effect
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = (Math.random() * 2 - 1) * 0.8;
-      }
-      const src = ctx.createBufferSource();
-      src.buffer = buffer;
-      src.loop = true;
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = 1000;
-      src.connect(filter);
-      filter.connect(gainRef.current);
-      src.start();
-      noiseNodeRef.current = src;
-      return null;
-    } else if (type === 'cafe') {
-      let b0 = 0;
-      for (let i = 0; i < bufferSize; i++) {
-        const w = Math.random() * 2 - 1;
-        b0 = 0.99 * b0 + w * 0.02;
-        data[i] = b0 * 8 + (Math.random() * 2 - 1) * 0.1;
-      }
-    } else if (type === 'forest') {
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.sin(i * 0.001) * (Math.random() * 2 - 1) * 0.3 +
-                  Math.sin(i * 0.003) * (Math.random() * 2 - 1) * 0.2;
+  // ─── AUDIO ───────────────────────────────────────────────────────────────────
+  const buildNoiseBuffer = (ctx, key) => {
+    const size = ctx.sampleRate * 4
+    const buf  = ctx.createBuffer(1, size, ctx.sampleRate)
+    const data = buf.getChannelData(0)
+    if (key === 'white') {
+      for (let i = 0; i < size; i++) data[i] = Math.random() * 2 - 1
+    } else if (key === 'brown') {
+      let last = 0
+      for (let i = 0; i < size; i++) {
+        const w = Math.random() * 2 - 1
+        data[i] = (last + 0.02 * w) / 1.02
+        last = data[i]; data[i] *= 3.5
       }
     } else {
-      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-      for (let i = 0; i < bufferSize; i++) {
-        const w = Math.random() * 2 - 1;
-        b0 = 0.99886 * b0 + w * 0.0555179;
-        b1 = 0.99332 * b1 + w * 0.0750759;
-        b2 = 0.96900 * b2 + w * 0.1538520;
-        b3 = 0.86650 * b3 + w * 0.3104856;
-        b4 = 0.55000 * b4 + w * 0.5329522;
-        b5 = -0.7616 * b5 - w * 0.0168980;
-        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
-        b6 = w * 0.115926;
+      // pink (also used as base for rain/cafe/forest with filter)
+      let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0
+      for (let i = 0; i < size; i++) {
+        const w = Math.random() * 2 - 1
+        b0=.99886*b0+w*.0555179; b1=.99332*b1+w*.0750759
+        b2=.96900*b2+w*.1538520; b3=.86650*b3+w*.3104856
+        b4=.55000*b4+w*.5329522; b5=-.7616*b5-w*.0168980
+        data[i]=(b0+b1+b2+b3+b4+b5+b6+w*.5362)*.11; b6=w*.115926
       }
     }
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
-    return src;
-  }, []);
+    return buf
+  }
 
   const stopNoise = useCallback(() => {
-    if (noiseNodeRef.current) {
-      try {
-        noiseNodeRef.current.stop();
-      } catch (_) {}
-      noiseNodeRef.current = null;
-    }
-  }, []);
+    try { noiseNode.current?.stop() } catch {}
+    noiseNode.current = null
+  }, [])
 
-  const startNoise = useCallback((type, vol) => {
-    stopNoise();
-    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+  const playNoise = useCallback((key, vol) => {
+    stopNoise()
+    if (!audioCtx.current || audioCtx.current.state === 'closed')
+      audioCtx.current = new (window.AudioContext || window.webkitAudioContext)()
+    const ctx = audioCtx.current
+    if (ctx.state === 'suspended') ctx.resume()
+    if (!gainNode.current || gainNode.current.context !== ctx) {
+      gainNode.current = ctx.createGain()
+      gainNode.current.connect(ctx.destination)
     }
-    const ctx = audioCtxRef.current;
-    if (ctx.state === "suspended") ctx.resume();
-    
-    if (!gainRef.current || gainRef.current.context !== ctx) {
-      gainRef.current = ctx.createGain();
-      gainRef.current.connect(ctx.destination);
+    gainNode.current.gain.setValueAtTime(vol, ctx.currentTime)
+    const buf = buildNoiseBuffer(ctx, ['rain','cafe','forest'].includes(key) ? 'pink' : key)
+    const src = ctx.createBufferSource()
+    src.buffer = buf; src.loop = true
+    if (['rain','cafe','forest'].includes(key)) {
+      const f = ctx.createBiquadFilter()
+      f.type = 'lowpass'
+      f.frequency.value = key === 'rain' ? 600 : key === 'cafe' ? 1000 : 800
+      src.connect(f); f.connect(gainNode.current)
+    } else {
+      src.connect(gainNode.current)
     }
-    gainRef.current.gain.setValueAtTime(vol, ctx.currentTime);
-    
-    const node = createNoiseNode(ctx, type);
-    node.connect(gainRef.current);
-    node.start();
-    noiseNodeRef.current = node;
-  }, [stopNoise, createNoiseNode]);
+    src.start()
+    noiseNode.current = src
+  }, [stopNoise])
 
   useEffect(() => {
-    if (noiseOn) {
-      startNoise(noiseType, volume);
-    } else {
-      stopNoise();
-    }
-  }, [noiseOn, noiseType, volume, startNoise, stopNoise]);
+    if (noiseOn) playNoise(noiseKey, volume)
+    else stopNoise()
+  }, [noiseOn, noiseKey, volume, playNoise, stopNoise])
 
-  // Completion sound
-  const playCompletionSound = useCallback(() => {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    oscillator.frequency.setValueAtTime(800, ctx.currentTime);
-    oscillator.frequency.setValueAtTime(600, ctx.currentTime + 0.1);
-    oscillator.frequency.setValueAtTime(800, ctx.currentTime + 0.2);
-    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-    oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + 0.5);
-  }, []);
+  // update gain when volume changes without restarting
+  useEffect(() => {
+    if (gainNode.current) gainNode.current.gain.value = volume
+  }, [volume])
 
-  // Browser notifications
-  const showNotification = useCallback((timerName, isWork) => {
-    if (!soundEnabled) return;
-    if (Notification.permission === 'granted') {
-      new Notification('Pomodoros.io', {
-        body: isWork ? `${timerName} focus session complete! Take a break.` : `Break over! Time to focus.`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico'
-      });
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission();
-    }
-  }, [soundEnabled]);
+  const beep = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      const osc = ctx.createOscillator()
+      const g   = ctx.createGain()
+      osc.connect(g); g.connect(ctx.destination)
+      osc.frequency.setValueAtTime(880, ctx.currentTime)
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.15)
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.3)
+      g.gain.setValueAtTime(0.4, ctx.currentTime)
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6)
+      osc.start(); osc.stop(ctx.currentTime + 0.65)
+    } catch {}
+  }
 
-  // Focus streak update
-  const updateStreak = useCallback(() => {
-    const today = new Date().toDateString();
-    const lastDate = localStorage.getItem('pomodoros_last_date');
-    if (lastDate === today) return;
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const newStreak = lastDate === yesterday.toDateString()
-      ? parseInt(localStorage.getItem('pomodoros_streak') || '0') + 1
-      : 1;
-    localStorage.setItem('pomodoros_streak', newStreak);
-    localStorage.setItem('pomodoros_last_date', today);
-    setStreak(newStreak);
-  }, []);
-
-  // Utility functions
-  const ProGate = ({ children, feature }) => {
-    if (isPro) return children;
-    return (
-      <div style={{ position: 'relative', filter: 'blur(2px)', pointerEvents: 'none' }}>
-        {children}
-        <div
-          onClick={(e) => { e.stopPropagation(); setShowUpgrade(true); }}
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'rgba(0,0,0,0.3)', borderRadius: '12px',
-            cursor: 'pointer', pointerEvents: 'all'
-          }}>
-          <div style={{
-            background: accentBlue, color: 'white', padding: '8px 16px',
-            borderRadius: '20px', fontSize: '12px', fontWeight: '600'
-          }}>🔒 Pro Feature</div>
-        </div>
-      </div>
-    );
-  };
-
-  const showConfetti = () => {
-    const colors = ['#E07B4F', '#4FA8E0', '#FFD700', '#34C77B', '#FF6B6B'];
+  // ─── CONFETTI ────────────────────────────────────────────────────────────────
+  const confetti = () => {
+    const colors = ['#BA4949','#38858A','#FFD700','#fff','#34C77B']
     for (let i = 0; i < 50; i++) {
-      const confetti = document.createElement('div');
-      confetti.style.cssText = `
-        position: fixed;
-        width: ${4 + Math.random() * 8}px;
-        height: ${4 + Math.random() * 8}px;
-        background: ${colors[Math.floor(Math.random() * colors.length)]};
-        left: ${Math.random() * 100}vw;
-        top: -20px;
-        border-radius: ${Math.random() > 0.5 ? '50%' : '2px'};
-        z-index: 9999;
-        pointer-events: none;
-        animation: confettiFall ${1 + Math.random() * 2}s ease-in forwards;
-        animation-delay: ${Math.random() * 0.5}s;
-      `;
-      document.body.appendChild(confetti);
-      setTimeout(() => confetti.remove(), 3000);
+      const el = document.createElement('div')
+      el.style.cssText = `position:fixed;width:${4+Math.random()*7}px;height:${4+Math.random()*7}px;background:${colors[i%colors.length]};left:${Math.random()*100}vw;top:-10px;border-radius:50%;z-index:99999;pointer-events:none;animation:cfall ${1+Math.random()*2}s ease-in forwards;animation-delay:${Math.random()*0.5}s`
+      document.body.appendChild(el)
+      setTimeout(() => el.remove(), 3000)
     }
-  };
+  }
 
-  const shareAsImage = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 800;
-    canvas.height = 400;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#0A0A0F';
-    ctx.fillRect(0, 0, 800, 400);
-    ctx.fillStyle = '#EDEDED';
-    ctx.font = 'bold 32px -apple-system, sans-serif';
-    ctx.fillText('Pomodoros.io', 40, 60);
-    ctx.font = '18px -apple-system, sans-serif';
-    ctx.fillStyle = 'rgba(237,237,237,0.6)';
-    ctx.fillText(new Date().toLocaleDateString(), 40, 90);
-    ctx.fillStyle = '#E07B4F';
-    ctx.font = 'bold 72px -apple-system, sans-serif';
-    ctx.fillText(formatTime(totalWorkSecs), 40, 200);
-    ctx.fillStyle = 'rgba(237,237,237,0.6)';
-    ctx.font = '20px -apple-system, sans-serif';
-    ctx.fillText('Total Focus Time', 40, 240);
-    ctx.fillStyle = '#EDEDED';
-    ctx.font = 'bold 48px -apple-system, sans-serif';
-    ctx.fillText(`${totalCycles} cycles`, 40, 320);
-    ctx.fillStyle = 'rgba(237,237,237,0.4)';
-    ctx.font = '16px -apple-system, sans-serif';
-    ctx.fillText('pomodoros.io — Free Multi Timer for Deep Work', 40, 380);
-    const link = document.createElement('a');
-    link.download = `pomodoros-${new Date().toISOString().split('T')[0]}.png`;
-    link.href = canvas.toDataURL();
-    link.click();
-  };
+  // ─── MULTI TIMER LOGIC ───────────────────────────────────────────────────────
+  const clearTimerInterval = (id) => {
+    clearInterval(timerRefs.current[id])
+    delete timerRefs.current[id]
+  }
 
-  const showToast = (message) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 5000);
-  };
+  const addTimer = () => {
+    if (timers.length >= 4) { showToast('Maximum 4 timers'); return }
+    const id  = Date.now()
+    const num = timers.length + 1
+    setTimers(prev => [...prev, makeTimer(id, num)])
+  }
 
-  const quotes = [
-    "Great work! Take a well-deserved break. 🌟",
-    "You crushed that session! Rest up. 💪",
-    "Focus complete! Your brain needs this break. 🧠",
-    "Amazing focus! Recharge and come back stronger. ⚡",
-    "Session done! Step away and breathe. 🌿",
-    "You're on fire! Take 5 and keep going. 🔥",
-    "Deep work done! Rest is part of the process. 🎯"
-  ];
+  const removeTimer = (id) => {
+    clearTimerInterval(id)
+    setTimers(prev => (prev || []).filter(t => t.id !== id))
+  }
 
-  // Global Styles
+  const startTimer = useCallback((id) => {
+    if (timerRefs.current[id]) return
+    bumpStreak()
+    timerRefs.current[id] = setInterval(() => {
+      setTimers(prev => (prev || []).map(t => {
+        if (t.id !== id) return t
+        // tick
+        if (t.secsLeft > 1) {
+          const upd = { ...t, secsLeft: t.secsLeft - 1 }
+          if (t.mode === 'pomodoro') upd.totalFocusSecs = t.totalFocusSecs + 1
+          else upd.totalBreakSecs = t.totalBreakSecs + 1
+          return upd
+        }
+        // session complete
+        clearInterval(timerRefs.current[id])
+        delete timerRefs.current[id]
+        beep()
+        const isPomodoro = t.mode === 'pomodoro'
+        const newCycles = isPomodoro ? t.cyclesDone + 1 : t.cyclesDone
+        confetti()
+        showToast(isPomodoro ? `🍅 ${t.name} complete! Take a break.` : `⚡ Break over — back to focus!`)
+        // determine next mode
+        let nextMode
+        if (isPomodoro) {
+          nextMode = newCycles % settings.longBreakEvery === 0 ? 'longBreak' : 'shortBreak'
+        } else {
+          nextMode = 'pomodoro'
+        }
+        const nextSecs = nextMode === 'pomodoro'
+          ? settings.pomodoroMin * 60
+          : nextMode === 'shortBreak'
+          ? settings.shortBreakMin * 60
+          : settings.longBreakMin * 60
+        const upd = {
+          ...t,
+          running: false,
+          mode: nextMode,
+          secsLeft: nextSecs,
+          cyclesDone: newCycles,
+          totalFocusSecs: isPomodoro ? t.totalFocusSecs + 1 : t.totalFocusSecs,
+          totalBreakSecs: !isPomodoro ? t.totalBreakSecs + 1 : t.totalBreakSecs,
+        }
+        return upd
+      }))
+    }, 1000)
+  }, [bumpStreak, showToast, settings])
+
+  const pauseTimer = useCallback((id) => {
+    clearTimerInterval(id)
+    setTimers(prev => (prev || []).map(t => t.id === id ? { ...t, running: false } : t))
+  }, [])
+
+  const resetTimer = useCallback((id) => {
+    clearTimerInterval(id)
+    setTimers(prev => (prev || []).map(t => {
+      if (t.id !== id) return t
+      const secs = t.mode === 'pomodoro' ? settings.pomodoroMin * 60
+        : t.mode === 'shortBreak' ? settings.shortBreakMin * 60
+        : settings.longBreakMin * 60
+      return { ...t, running: false, secsLeft: secs }
+    }))
+  }, [settings])
+
+  const toggleTimer = useCallback((id) => {
+    setTimers(prev => (prev || []).map(t => {
+      if (t.id !== id) return t
+      if (t.running) { pauseTimer(id); return { ...t, running: false } }
+      else { startTimer(id); return { ...t, running: true } }
+    }))
+  }, [pauseTimer, startTimer])
+
+  const changeTimerPhase = useCallback((id, mode) => {
+    clearTimerInterval(id)
+    const secs = mode === 'pomodoro' ? settings.pomodoroMin * 60
+      : mode === 'shortBreak' ? settings.shortBreakMin * 60
+      : settings.longBreakMin * 60
+    setTimers(prev => (prev || []).map(t => t.id === id ? { ...t, running: false, mode, secsLeft: secs, totalSecs: secs } : t))
+  }, [settings])
+
+  const updateTimerField = useCallback((id, field, val) => {
+    setTimers(prev => (prev || []).map(t => t.id === id ? { ...t, [field]: val } : t))
+  }, [])
+
+  const adjustTimer = useCallback((id, delta) => {
+    setTimers(prev => (prev || []).map(t => {
+      if (t.id !== id || t.running) return t
+      const s = Math.max(60, Math.min(3600, t.secsLeft + delta))
+      return { ...t, secsLeft: s, totalSecs: s }
+    }))
+  }, [])
+
+  // ─── STOPWATCH LOGIC ─────────────────────────────────────────────────────────
+  const addStopwatch = () => {
+    if (stopwatches.length >= 4) { showToast('Maximum 4 stopwatches'); return }
+    const id = Date.now()
+    setStopwatches(prev => [...prev, makeSW(id, prev.length + 1)])
+  }
+
+  const removeSW = (id) => {
+    clearInterval(swRefs.current[id]); delete swRefs.current[id]
+    setStopwatches(prev => (prev || []).filter(s => s.id !== id))
+  }
+
+  const toggleSW = (id) => {
+    setStopwatches(prev => {
+      const sw = (prev || []).find(s => s.id === id)
+      if (!sw) return prev
+      if (sw.running) {
+        clearInterval(swRefs.current[id]); delete swRefs.current[id]
+        return (prev || []).map(s => s.id === id ? { ...s, running: false } : s)
+      } else {
+        const start = Date.now() - sw.elapsed * 1000
+        swRefs.current[id] = setInterval(() => {
+          setStopwatches(p => (p || []).map(s => s.id === id
+            ? { ...s, elapsed: Math.floor((Date.now() - start) / 1000) } : s))
+        }, 200)
+        return (prev || []).map(s => s.id === id ? { ...s, running: true } : s)
+      }
+    })
+  }
+
+  const lapSW = (id) => {
+    setStopwatches(prev => (prev || []).map(s => {
+      if (s.id !== id || !s.running) return s
+      const prevTotal = s.laps.length ? s.laps[s.laps.length - 1].total : 0
+      return { ...s, laps: [...s.laps, { n: s.laps.length + 1, split: s.elapsed - prevTotal, total: s.elapsed }] }
+    }))
+  }
+
+  const resetSW = (id) => {
+    clearInterval(swRefs.current[id]); delete swRefs.current[id]
+    setStopwatches(prev => (prev || []).map(s => s.id === id ? { ...s, elapsed: 0, running: false, laps: [] } : s))
+  }
+
+  // ─── KEYBOARD ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const style = document.createElement('style');
-    style.innerHTML = `
-      @keyframes pulse {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.4; transform: scale(0.85); }
-      }
-      @keyframes confettiFall {
-        0% { transform: translateY(0) rotate(0deg); opacity: 1; }
-        100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
-      }
-      @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      .timer-display {
-        user-select: none;
-        -webkit-user-select: none;
-        cursor: default;
-        caret-color: transparent;
-      }
-      * {
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-        font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-      }
-      * {
-        scrollbar-width: none;
-        -ms-overflow-style: none;
-      }
-      *::-webkit-scrollbar {
-        display: none;
-      }
-      @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(4px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      @media (max-width: 768px) {
-        /* Header */
-        .pomodoros-header {
-          padding: 0 16px !important;
-        }
-        /* Nav bar wraps on small screens */
-        .nav-bar {
-          width: calc(100% - 16px) !important;
-          left: 8px !important;
-          transform: none !important;
-          flex-wrap: wrap !important;
-          justify-content: center !important;
-          gap: 2px !important;
-          padding: 3px !important;
-        }
-        .nav-bar button {
-          padding: 6px 8px !important;
-          font-size: 11px !important;
-          min-width: unset !important;
-        }
-        /* Main content starts lower on mobile */
-        .pomodoros-main {
-          top: 130px !important;
-        }
-        /* Timer and stopwatch grids stack vertically */
-        .timer-grid-2, .timer-grid-4 {
-          grid-template-columns: 1fr !important;
-          grid-template-rows: unset !important;
-          height: auto !important;
-          overflow-y: auto !important;
-          padding: 8px !important;
-          gap: 8px !important;
-        }
-        .timer-card, .stopwatch-card {
-          max-height: 260px !important;
-          min-height: unset !important;
-          padding: 12px 16px !important;
-        }
-        .timer-card .countdown-display {
-          font-size: 40px !important;
-        }
-        .stopwatch-card .countdown-display {
-          font-size: 40px !important;
-        }
-        .sw-display {
-          font-size: 40px !important;
-        }
-        /* Stats grid stacks */
-        .stats-row {
-          grid-template-columns: 1fr 1fr !important;
-          gap: 6px !important;
-        }
-        .stats-grid {
-          padding: 8px !important;
-        }
-        .task-breakdown-grid {
-          grid-template-columns: 1fr !important;
-        }
-        /* Noise buttons stack */
-        .noise-buttons {
-          flex-direction: column !important;
-          align-items: center !important;
-        }
-        /* Notes textarea full width */
-        .notes-container {
-          max-width: 100% !important;
-          width: 100% !important;
-          padding: 0 16px !important;
-          box-sizing: border-box !important;
-        }
-        .notes-container h2 {
-          font-size: 20px !important;
-          margin-bottom: 16px !important;
-        }
-        .notes-container textarea {
-          height: 200px !important;
-        }
-        /* Timer countdown smaller on mobile */
-        .countdown-display {
-          font-size: 56px !important;
-        }
-      }
-      @media (max-width: 480px) {
-        .stats-row {
-          grid-template-columns: 1fr 1fr !important;
-        }
-        .nav-bar button {
-          padding: 5px 8px !important;
-          font-size: 10px !important;
-        }
-        .countdown-display {
-          font-size: 44px !important;
-        }
-      }
-      button:focus {
-        outline: none !important;
-        box-shadow: none !important;
-      }
-      button:focus-visible {
-        outline: none !important;
-        box-shadow: none !important;
-      }
-      * {
-        -webkit-tap-highlight-color: transparent;
-      }
-    `;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
+    const onKey = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (e.code === 'Space') { e.preventDefault(); if (timers[0]) toggleTimer(timers[0].id) }
+      if (e.code === 'KeyR' && !e.ctrlKey) { if (timers[0]) resetTimer(timers[0].id) }
+      if (e.code === 'KeyN') setNoiseOn(p => !p)
+      const tabMap = { Digit1:'timer', Digit2:'sounds', Digit3:'notes', Digit4:'stopwatch', Digit5:'stats' }
+      if (tabMap[e.code]) setTab(tabMap[e.code])
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [timers, toggleTimer, resetTimer])
 
-  // Dynamic Tab Title
+  // ─── RESIZE ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const runningTimers = timers.filter(t => t.running);
-    if (runningTimers.length === 0) {
-      document.title = 'Pomodoros.io – Multi Timer for Deep Work';
-    } else if (runningTimers.length === 1) {
-      const t = runningTimers[0];
-      const mins = Math.floor(t.secsLeft / 60);
-      const secs = t.secsLeft % 60;
-      const time = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-      const phase = t.phase === 'work' ? 'Focus' : 'Rest';
-      document.title = `${time} – ${t.name} – ${phase}`;
+    const onResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // ─── PWA ─────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const h = (e) => { e.preventDefault(); setInstallPrompt(e) }
+    window.addEventListener('beforeinstallprompt', h)
+    return () => window.removeEventListener('beforeinstallprompt', h)
+  }, [])
+
+  // ─── PERSIST ─────────────────────────────────────────────────────────────────
+  useEffect(() => { ls.set('pom_tasks', tasks) }, [tasks])
+  useEffect(() => { ls.set('pom_templates', templates) }, [templates])
+  useEffect(() => { ls.set('pom_settings', settings) }, [settings])
+  useEffect(() => { ls.set('pom_note', note) }, [note])
+
+  // ─── FOCUS SCORE ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const score = calculateFocusScore(
+      totalFocusSecs,
+      totalCycles,
+      distractions.length
+    )
+
+    setFocusScore(score)
+
+    ls.set('pom_focus_score', score)
+  }, [
+    totalFocusSecs,
+    totalCycles,
+    distractions
+  ])
+
+  // ─── AUTO TRACKING ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const running = (timers || []).filter(
+        t => t.running && t.mode === 'pomodoro'
+      )
+
+      if (!running.length) return
+
+      updateHeatmap(running.length, setHeatmapData)
+      updateHourlyFocus(running.length, setHourlyFocusData)
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [timers, setHeatmapData, setHourlyFocusData])
+
+  // ─── INSIGHTS ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    generateInsights(hourlyFocusData)
+  }, [hourlyFocusData])
+
+  // ─── COACH UPDATES ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    generateCoachMessage(totalFocusSecs, totalCycles, streak, focusScore, distractions, setCoachMessages)
+  }, [
+    totalFocusSecs,
+    totalCycles,
+    focusScore,
+    streak,
+    distractions,
+    setCoachMessages
+  ])
+
+  // ─── BADGE CHECKS ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    checkBadges(totalCycles, streak, focusScore, setBadges)
+  }, [
+    totalCycles,
+    streak,
+    focusScore,
+    setBadges
+  ])
+
+  // ─── RPG LEVEL SYSTEM ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const title = getPlayerTitle(level)
+
+    setPlayerTitle(title)
+
+    ls.set('pom_player_title', title)
+  }, [level])
+
+  // ─── DAILY REVIEW ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    buildDailyReview(totalFocusSecs, totalCycles, focusScore, streak, setDailyReview)
+  }, [
+    totalFocusSecs,
+    totalCycles,
+    focusScore,
+    streak,
+    setDailyReview
+  ])
+
+  // ─── DYNAMIC TITLE ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    const running = (timers || []).filter(t => t.running)
+    if (!running.length) { document.title = 'Pomodoros.io – Free Multi Timer'; return }
+    if (running.length === 1) {
+      const t = running[0]
+      document.title = `${fmtTime(t.secsLeft)} – ${t.name}`
     } else {
-      document.title = `${runningTimers.length} Sessions Running – Pomodoros.io`;
+      document.title = `${running.length} timers running – Pomodoros.io`
     }
-  }, [timers]);
+  }, [timers])
 
-  // Note Auto-save
+  // ─── CLEANUP ─────────────────────────────────────────────────────────────────
+  useEffect(() => () => {
+    Object.values(timerRefs.current).forEach(clearInterval)
+    Object.values(swRefs.current).forEach(clearInterval)
+  }, [])
+
+  // ─── SETTINGS SAVE ───────────────────────────────────────────────────────────
+  const saveSettings = () => {
+    setSettings(tempSettings)
+    // apply new times to non-running timers
+    setTimers(prev => (prev || []).map(t => {
+      if (t.running) return t
+      const secs = t.mode === 'pomodoro' ? tempSettings.pomodoroMin * 60
+        : t.mode === 'shortBreak' ? tempSettings.shortBreakMin * 60
+        : tempSettings.longBreakMin * 60
+      return { ...t, secsLeft: secs }
+    }))
+    setShowSettings(false)
+    showToast('Settings saved')
+  }
+
+  // ─── CSV EXPORT ──────────────────────────────────────────────────────────────
+  const exportCSV = () => {
+    const rows = [
+      ['Task', 'Focus Time', 'Break Time', 'Cycles', 'Date'],
+      ...(timers || []).map(t => [t.name, fmtTime(t.totalFocusSecs || 0), fmtTime(t.totalBreakSecs || 0), t.cyclesDone || 0, new Date().toLocaleDateString()]),
+      ['', '', '', '', ''],
+      ['TOTAL', fmtTime(totalFocusSecs), fmtTime(totalBreakSecs), totalCycles, ''],
+    ]
+    const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n')
+    const a = document.createElement('a')
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv)
+    a.download = `pomodoros-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    showToast('CSV downloaded 📊')
+  }
+
+  const shareX = () => window.open(
+    'https://x.com/intent/tweet?text=' + encodeURIComponent(
+      `Just crushed my focus goals on pomodoros.io! 🍅\n⏱️ Focus: ${fmtTime(totalFocusSecs)}\n✅ Cycles: ${totalCycles}\nhttps://www.pomodoros.io`
+    ), '_blank'
+  )
+
+  // ─── WASH MODE ───────────────────────────────────────────────────────────────
+  const openWashMode = () => {
+    const w = window.open('', '_blank')
+    w.document.write(`<!DOCTYPE html><html><head><title>Focus Color – Pomodoros.io</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,sans-serif}h1{color:#fff;font-size:20px;font-weight:300;letter-spacing:2px;margin-bottom:28px}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:20px;max-width:500px;width:100%}
+    .c{aspect-ratio:1;border-radius:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;border:2px solid rgba(255,255,255,0.15);transition:.2s}
+    .c:hover{transform:scale(1.04);border-color:rgba(255,255,255,0.4)}
+    .fs{position:fixed!important;inset:0;border-radius:0!important;border:none!important;z-index:9999;font-size:16px;letter-spacing:3px}
+    </style></head><body>
+    <h1>Choose Focus Color</h1>
+    <div class="grid">
+    ${WASH_COLORS.map(c => `<div class="c" style="background:${c.bg};color:${c.fg}" data-bg="${c.bg}" data-fg="${c.fg}">${c.label}</div>`).join('')}
+    </div>
+    <script>
+    let active=null;
+    document.querySelectorAll('.c').forEach(el=>{
+      el.addEventListener('click',()=>{
+        if(active){active.classList.remove('fs');active.textContent=active.dataset.label;active=null;document.body.style.background='#1a1a2e';return;}
+        el.dataset.label=el.textContent;el.textContent='Click to exit';el.classList.add('fs');active=el;document.body.style.background=el.dataset.bg;
+      });
+    });
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&active){active.classList.remove('fs');active.textContent=active.dataset.label;active=null;document.body.style.background='#1a1a2e';}});
+    </script></body></html>`)
+    w.document.close()
+  }
+
+  // ─── GLOBAL STYLES ───────────────────────────────────────────────────────────
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      localStorage.setItem("pomodoros_note", note);
-    }, 500);
-    return () => clearTimeout(timeout);
-  }, [note]);
+    const s = document.createElement('style')
+    s.id = 'pom-global'
+    s.textContent = `
+      @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+      *, *::before, *::after { box-sizing: border-box; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+      *::-webkit-scrollbar { width: 4px; } *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+      body, html { margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; background: #0f172a; }
+      button { cursor: pointer; font-family: inherit; transition: all .2s cubic-bezier(0.23,1,0.32,1); }
+      button:focus, input:focus, textarea:focus { outline: none; }
+      @keyframes cfall { 0%{transform:translateY(0) rotate(0);opacity:1} 100%{transform:translateY(105vh) rotate(540deg);opacity:0} }
+      @keyframes fadeUp { from{opacity:0;transform:translateX(-50%) translateY(10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+      @keyframes meshFloat { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-20px) scale(1.05)} }
+      .start-btn:hover { transform: translateY(-3px) scale(1.03) !important; box-shadow: 0 15px 40px rgba(0,0,0,0.4) !important; }
+      .tab-btn:hover { background: rgba(255,255,255,0.08) !important; color: #f8fafc !important; }
+      .task-row:hover { border-color: rgba(255,255,255,0.12) !important; background: rgba(255,255,255,0.05) !important; }
+      .icon-btn:hover { background: rgba(255,255,255,0.12) !important; transform: translateY(-2px); }
+      .adj-btn:hover { background: rgba(255,255,255,0.1) !important; border-color: rgba(255,255,255,0.3) !important; }
+      .timer-grid { transition: all 0.45s cubic-bezier(0.23,1,0.32,1) !important; }
+      .sw-grid    { transition: all 0.45s cubic-bezier(0.23,1,0.32,1) !important; }
+      .preset-btn:hover { border-color: #10b981 !important; color: #10b981 !important; background: rgba(16,185,129,0.08) !important; }
+      .work-btn:hover  { box-shadow: 0 0 20px rgba(16,185,129,0.3) !important; }
+      .break-btn:hover { box-shadow: 0 0 20px rgba(59,130,246,0.3) !important; }
+      input::placeholder { color: #334155 !important; }
+      textarea::placeholder { color: #334155 !important; }
+      html, body { overflow: hidden !important; height: 100% !important; }
+      #root { height: 100% !important; overflow: hidden !important; }
+      .timer-grid > div { background: transparent !important; border: none !important; box-shadow: none !important; }
+      @media(max-width:767px){.timer-grid{grid-template-columns:1fr!important}.sw-grid{grid-template-columns:1fr!important}}
+    `
+    document.head.appendChild(s)
+    return () => document.head.removeChild(s)
+  }, [])
 
-  // Wash mode function — identical to your original
-  const openWashMode = useCallback(() => {
-    const newWindow = window.open('', '_blank');
-    
-    newWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Color Wash - Pomodoros</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            html, body { 
-              background: #121212; 
-              width: 100vw;
-              height: 100vh;
-              overflow: hidden;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-            }
-            .palette-container {
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-              gap: 16px;
-              padding: 40px;
-              max-width: 800px;
-              width: 100%;
-            }
-            .color-card {
-              aspect-ratio: 1;
-              border-radius: 16px;
-              cursor: pointer;
-              transition: all 0.3s ease;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-weight: 500;
-              font-size: 14px;
-              letter-spacing: 1px;
-              text-transform: uppercase;
-              border: 2px solid rgba(255, 255, 255, 0.1);
-              position: relative;
-              overflow: hidden;
-            }
-            .color-card:hover {
-              transform: translateY(-4px);
-              box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
-              border-color: rgba(255, 255, 255, 0.3);
-            }
-            .color-card.fullscreen {
-              position: fixed;
-              top: 0;
-              left: 0;
-              width: 100vw;
-              height: 100vh;
-              border-radius: 0;
-              border: none;
-              z-index: 9999;
-              cursor: default;
-            }
-                        .title {
-              color: #e8e8e8;
-              font-size: 24px;
-              font-weight: 300;
-              letter-spacing: 2px;
-              margin-bottom: 32px;
-              text-align: center;
-            }
-          </style>
-        </head>
-        <body>
-          <h1 class="title">Choose Your Focus Color</h1>
-          <div class="palette-container">
-            ${WASH_MODES.map((color, index) => `
-              <div class="color-card" 
-                   style="background: ${color.bg}; color: ${color.text};"
-                   data-index="${index}"
-                   data-bg="${color.bg}"
-                   data-text="${color.text}">
-                ${color.label}
-              </div>
-            `).join('')}
-          </div>
-          
-          <script>
-            const WASH_MODES = ${JSON.stringify(WASH_MODES)};
-            let isFullscreen = false;
-            let currentColor = null;
-            
-            function enterFullscreen(color) {
-              const card = event.target;
-              const bg = card.dataset.bg;
-              const text = card.dataset.text;
-              
-              currentColor = { bg, text };
-              
-              // Apply fullscreen styling
-              card.classList.add('fullscreen');
-              card.addEventListener('click', exitFullscreen, { once: true });
-              document.body.style.background = bg;
-              
-              // Hide other elements
-              document.querySelector('.palette-container').style.display = 'none';
-              document.querySelector('.title').style.display = 'none';
-              
-              // Request fullscreen
-              const elem = document.documentElement;
-              const requestFullscreen = elem.requestFullscreen || 
-                                      elem.webkitRequestFullscreen || 
-                                      elem.mozRequestFullScreen || 
-                                      elem.msRequestFullscreen;
-              
-              if (requestFullscreen) {
-                requestFullscreen.call(elem).catch(err => {
-                  console.log('Fullscreen request failed:', err);
-                });
-              }
-              
-              isFullscreen = true;
-              document.body.addEventListener('click', function onBodyClick() {
-                exitFullscreen();
-                document.body.removeEventListener('click', onBodyClick);
-              });
-            }
-            
-            function exitFullscreen() {
-              if (!isFullscreen) return;
-              
-              // Exit fullscreen
-              if (document.fullscreenElement) {
-                document.exitFullscreen().then(() => {
-                  // Return to color palette after exiting fullscreen
-                  returnToPalette();
-                }).catch(() => {
-                  // Fallback: return to palette even if exit fails
-                  returnToPalette();
-                });
-              } else {
-                // If not in fullscreen, just return to palette
-                returnToPalette();
-              }
-            }
-            
-            function returnToPalette() {
-              // Reset fullscreen state
-              isFullscreen = false;
-              
-              // Show all elements again
-              document.querySelector('.palette-container').style.display = 'grid';
-              document.querySelector('.title').style.display = 'block';
-              
-              // Reset background
-              document.body.style.background = '#121212';
-              
-              // Remove fullscreen class from any color card
-              const fullscreenCard = document.querySelector('.color-card.fullscreen');
-              if (fullscreenCard) {
-                fullscreenCard.classList.remove('fullscreen');
-              }
-            }
-            
-            // Add click handlers to color cards
-            document.querySelectorAll('.color-card').forEach(card => {
-              card.addEventListener('click', enterFullscreen);
-            });
-            
-            // ESC to exit
-            document.addEventListener('keydown', (e) => {
-              if (e.key === 'Escape' || e.key === 'Esc') {
-                e.preventDefault();
-                e.stopPropagation();
-                exitFullscreen();
-              }
-            });
-            
-            // Fullscreen change event listener
-            document.addEventListener('fullscreenchange', () => {
-              if (!document.fullscreenElement && isFullscreen) {
-                // User exited fullscreen (via ESC, F11, etc.)
-                returnToPalette();
-              }
-            });
-            
-            // Also listen for vendor-specific fullscreen events
-            document.addEventListener('webkitfullscreenchange', () => {
-              if (!document.webkitFullscreenElement && isFullscreen) {
-                returnToPalette();
-              }
-            });
-            
-            document.addEventListener('mozfullscreenchange', () => {
-              if (!document.mozFullScreenElement && isFullscreen) {
-                returnToPalette();
-              }
-            });
-            
-            document.addEventListener('MSFullscreenChange', () => {
-              if (!document.msFullscreenElement && isFullscreen) {
-                returnToPalette();
-              }
-            });
-            
-            // Prevent interactions
-            document.addEventListener('contextmenu', (e) => e.preventDefault());
-            document.addEventListener('selectstart', (e) => e.preventDefault());
-            document.addEventListener('dragstart', (e) => e.preventDefault());
-          </script>
-        </body>
-      </html>
-    `);
-    newWindow.document.close();
-  }, []);
+  
+  // ─── TIMER CARD ──────────────────────────────────────────────────────────────
+  const TimerCard = ({ timer, count }) => {
+    const isLarge  = count === 1
+    const isMed    = count === 2
+    const digitPx  = isMobile ? 80 : isLarge ? 120 : isMed ? 78 : 56
+    const padV     = isLarge ? 32 : isMed ? 22 : 14
+    const padH     = isLarge ? 40 : isMed ? 28 : 18
 
-  return (
-    <div style={{
-      background: bg,
-      width: "100vw",
-      height: "100vh",
-      color: text,
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-      position: "fixed",
-      top: 0,
-      left: 0,
-      overflow: "hidden"
-    }}>
-      {/* Header */}
-      <div className="pomodoros-header" style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: "52px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "0 30px",
-        zIndex: 10,
-        background: themeMode === 'dark' ? 'rgba(10,10,15,0.8)' : 'rgba(232,228,220,0.9)',
-        backdropFilter: 'blur(20px)',
-        borderBottom: `1px solid ${border}`
-      }}>
-        {/* Logo */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <div style={{
-            color: accent,
-            fontSize: '15px',
-            fontWeight: '600',
-            letterSpacing: '0.3px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <span style={{
-              display: 'inline-block',
-              width: '10px',
-              height: '10px',
-              borderRadius: '50%',
-              background: accentBlue,
-              animation: 'pulse 2s ease-in-out infinite'
-            }} />
-            Pomodoros.io
-            {streak > 0 && (
-              <div style={{ fontSize: '10px', color: '#E07B4F', fontWeight: '600' }}>
-                🔥 {streak} day streak
-              </div>
-            )}
-          </div>
-          <div style={{
-            fontSize: '10px',
-            color: textDim,
-            letterSpacing: '0.3px',
-            fontWeight: '400',
-            opacity: 0.4
-          }}>
-            Free Multi Timer · Deep Work · Focus Sessions
-          </div>
-        </div>
+    const modeColor = {
+      pomodoro:   '#BA4949',
+      shortBreak: '#38858A',
+      longBreak:  '#397097',
+    }[timer.mode]
 
-        {/* Utility Row */}
-        <div style={{
-          display: "flex",
-          gap: "12px",
-          alignItems: "center"
-        }}>
-          <button
-  onClick={() => setThemeMode(m => m === 'dark' ? 'light' : 'dark')}
-  style={{
-    width: '36px', height: '36px', minWidth: '36px',
-    borderRadius: '10px',
-    backgroundColor: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-    border: '1px solid rgba(128,128,128,0.3)',
-    cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: '0', flexShrink: 0
-  }}>
-  {themeMode === 'dark'
-    ? <Sun size={16} color="#FFFFFF" strokeWidth={2} />
-    : <Moon size={16} color="#000000" strokeWidth={2} />}
-</button>
-
-<button
-  onClick={openWashMode}
-  style={{
-    width: '36px', height: '36px', minWidth: '36px',
-    borderRadius: '10px',
-    backgroundColor: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-    border: '1px solid rgba(128,128,128,0.3)',
-    cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: '0', flexShrink: 0
-  }}>
-  <Monitor size={16} color={themeMode === 'dark' ? '#FFFFFF' : '#000000'} strokeWidth={2} />
-</button>
-{showInstall && (
-  <button onClick={handleInstall} style={{
-    background: 'transparent',
-    border: `1px solid ${accentBlue}`,
-    color: accentBlue,
-    padding: '8px 14px',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: '600'
-  }}>
-    📲 Install App
-  </button>
-)}
-<button onClick={() => setShowSettings(true)} style={{
-  background: 'transparent',
-  border: `1px solid ${border}`,
-  color: textDim,
-  padding: '8px 12px',
-  borderRadius: '10px',
-  cursor: 'pointer',
-  fontSize: '16px',
-  fontWeight: '500'
-}}>
-  ⚙️
-</button>
-<button onClick={() => setShowKeyboardHelp(true)} style={{
-  background: 'transparent',
-  border: `1px solid ${border}`,
-  color: textDim,
-  padding: '8px 12px',
-  borderRadius: '10px',
-  cursor: 'pointer',
-  fontSize: '16px',
-  fontWeight: '500'
-}}>
-  ?
-</button>
-{user && !isPro && (
-  <button onClick={() => setShowUpgrade(true)} style={{
-    background: 'linear-gradient(135deg, #E07B4F, #ff6b35)',
-    border: 'none',
-    color: 'white',
-    padding: '8px 16px',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: '700',
-    letterSpacing: '0.3px'
-  }}>
-    ⚡ Go Pro
-  </button>
-)}
-{isPro && (
-  <div style={{
-    background: 'linear-gradient(135deg, #FFD700, #FFA500)',
-    padding: '4px 12px',
-    borderRadius: '20px',
-    fontSize: '11px',
-    fontWeight: '700',
-    color: '#333'
-  }}>PRO ✨</div>
-)}
-{user ? (
-  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-    <img
-      src={user.user_metadata?.avatar_url}
-      alt="avatar"
-      style={{ width: '28px', height: '28px', borderRadius: '50%', cursor: 'pointer' }}
-      onClick={() => { fetchLeaderboard(); setShowLeaderboard(true); }}
-    />
-    <button
-      onClick={signOut}
-      style={{
-        background: 'transparent',
-        border: `1px solid ${border}`,
-        color: textDim,
-        padding: '6px 12px',
-        borderRadius: '8px',
-        cursor: 'pointer',
-        fontSize: '12px',
-        fontWeight: '500'
-      }}>
-      Sign Out
-    </button>
-  </div>
-) : (
-  <button
-    onClick={signInWithGoogle}
-    style={{
-      background: accentBlue,
-      border: 'none',
-      color: 'white',
-      padding: '8px 16px',
-      borderRadius: '10px',
-      cursor: 'pointer',
-      fontSize: '13px',
-      fontWeight: '600',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px'
-    }}>
-    Sign in with Google
-  </button>
-)}
-        </div>
-      </div>
-
-      {/* Top Navigation */}
-      <div className="nav-bar" style={{
-        position: "absolute",
-        top: isMobile ? '58px' : '60px',
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: isMobile ? 'calc(100% - 16px)' : 'auto',
-        flexWrap: isMobile ? 'wrap' : 'nowrap',
-        justifyContent: 'center',
-        background: themeMode === 'dark' ? 'rgba(17,17,24,0.6)' : 'rgba(216,212,204,0.8)',
-        backdropFilter: 'blur(12px)',
-        border: `1px solid ${border}`,
-        borderRadius: "12px",
-        padding: "3px",
-        display: "flex",
-        gap: "3px",
-        alignItems: "center",
-        overflowX: isMobile ? 'auto' : 'visible',
-        WebkitOverflowScrolling: 'touch'
-      }}>
-        {["timer", "noise", "note"].map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              background: tab === t ? accentBlue : "transparent",
-              color: tab === t ? "white" : textDim,
-              padding: "8px 16px",
-              cursor: "pointer",
-              borderRadius: "9px",
-              transition: "all 0.15s ease",
-              fontWeight: "500",
-              fontSize: "13px",
-              letterSpacing: "0.5px",
-              textTransform: "capitalize",
-              border: "none"
-            }}
-            onMouseEnter={(e) => {
-              if (tab !== t) {
-                e.target.style.background = surfaceHover;
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (tab !== t) {
-                e.target.style.background = "transparent";
-              }
-            }}
-          >
-            {t === 'stopwatch' ? 'Watch' : t}
-          </button>
-        ))}
-        
-        {/* Add Timer/Stopwatch Button */}
-        {(tab === "timer" || tab === "stopwatch") && (
-          <button
-            onClick={tab === "timer" ? addTimer : addStopwatch}
-            disabled={tab === "timer" ? timers.length >= 4 : stopwatches.length >= 4}
-            style={{
-              background: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? surface : "rgba(91,110,245,0.15)",
-              color: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? textDim : accentBlue,
-              border: `1px solid ${(tab === "timer" ? timers.length : stopwatches.length) >= 4 ? border : 'rgba(91,110,245,0.3)'}`,
-              padding: "8px 16px",
-              cursor: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? "not-allowed" : "pointer",
-              borderRadius: "9px",
-              transition: "all 0.15s ease",
-              fontWeight: "500",
-              fontSize: "13px",
-              letterSpacing: "0.5px",
-              opacity: (tab === "timer" ? timers.length : stopwatches.length) >= 4 ? 0.5 : 1,
-              marginLeft: "8px"
-            }}
-            onMouseEnter={(e) => {
-              if ((tab === "timer" ? timers.length : stopwatches.length) < 4) {
-                e.target.style.borderColor = borderHover;
-                e.target.style.transform = "translateY(-1px)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if ((tab === "timer" ? timers.length : stopwatches.length) < 4) {
-                e.target.style.borderColor = 'rgba(91,110,245,0.3)';
-                e.target.style.transform = "translateY(0)";
-              }
-            }}
-          >
-            + Add {(tab === "timer" ? timers.length : stopwatches.length) >= 4 && "(Max 4)"}
-          </button>
-        )}
-        <button
-          onClick={() => setShowTaskPanel(!showTaskPanel)}
-          style={{
-            background: showTaskPanel ? accentBlue : "transparent",
-            color: showTaskPanel ? "white" : textDim,
-            padding: "8px 16px",
-            cursor: "pointer",
-            borderRadius: "9px",
-            transition: "all 0.15s ease",
-            fontWeight: "500",
-            fontSize: "13px",
-            letterSpacing: "0.5px",
-            border: "none"
-          }}
-        >
-          Tasks
-        </button>
-      </div>
-
-      {/* Main Content */}
-      <div className="pomodoros-main" style={{
-        position: 'fixed',
-        top: isMobile ? '128px' : '108px',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        overflow: 'hidden',
+    return (
+      <div style={{
+        background: 'rgba(0,0,0,0.2)',
+        border: '1px solid rgba(255,255,255,0.18)',
+        borderTop: `3px solid rgba(255,255,255,0.6)`,
+        borderRadius: 12,
+        padding: `${padV}px ${padH}px`,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: (tab === 'timer' || tab === 'stopwatch') ? 'flex-start' : 'center',
-        height: '100%',
-        width: '100%'
-      }} onClick={() => { if (showTaskPanel) setShowTaskPanel(false); }}>
-        {/* Multi-Timer Section */}
-        {tab === "timer" && (
-          <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
-
-            
-            {/* Timer Grid */}
-            <div className={`timer-grid ${timers.length === 2 ? 'timer-grid-2' : 'timer-grid-4'}`} style={{
-              display: 'grid',
-              gridTemplateColumns: isMobile ? '1fr' : (timers.length === 1 ? '1fr' : '1fr 1fr'),
-              gridTemplateRows: 'unset',
-              gap: '8px',
-              padding: isMobile ? '8px' : '10px 16px',
-              height: isMobile ? 'auto' : 'calc(100vh - 108px)',
-              maxHeight: isMobile ? 'calc(100vh - 128px)' : 'unset',
-              overflowY: isMobile ? 'auto' : 'hidden',
-              boxSizing: 'border-box',
-              width: '100%',
-              maxWidth: (!isMobile && timers.length === 1) ? '520px' : '100%',
-              margin: (!isMobile && timers.length === 1) ? '0 auto' : '0',
-              transition: 'all 0.3s ease'
-            }}>
-              {timers.map((timer) => {
-                const timerCount = timers.length;
-                const cardPadding = timerCount === 1 ? '28px 32px' : timerCount === 2 ? '20px 24px' : '14px 16px';
-                return (
-                <div
-                  key={timer.id}
-                  className="timer-card"
-                  style={{
-                    background: themeMode === 'dark' ? 'rgba(17,17,24,0.8)' : 'rgba(220,216,208,0.9)',
-                    backdropFilter: 'blur(20px)',
-                    border: `1px solid ${border}`,
-                    borderTop: `2px solid ${timer.phase === 'work' ? '#E07B4F' : (timer.isLongBreak ? '#FFD700' : '#4FA8E0')}`,
-                    borderRadius: "16px",
-                    padding: isMobile ? '12px 14px' : cardPadding,
-                    maxHeight: isMobile ? '260px' : 'unset',
-                    height: isMobile ? 'auto' : '100%',
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    overflow: 'hidden',
-                    transition: 'all 0.3s ease'
-                  }}
-                >
-                  {/* Delete Button */}
-                  {timers.length > 1 && (
-                    <button
-                      onClick={() => deleteTimer(timer.id)}
-                      style={{
-                        position: "absolute",
-                        top: "12px",
-                        right: "12px",
-                        background: "transparent",
-                        border: "none",
-                        color: textDim,
-                        width: "24px",
-                        height: "24px",
-                        borderRadius: "6px",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: "10px",
-                        transition: "all 0.15s ease"
-                      }}
-                      onMouseEnter={(e) => {
-                        e.target.style.background = border;
-                        e.target.style.color = "#ff3b30";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.target.style.background = "transparent";
-                        e.target.style.color = textDim;
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
-
-                  {/* Timer Name */}
-                  <div style={{ marginBottom: '0', marginTop: '0' }}>
-                    {editingTimerId === timer.id ? (
-                      <input
-                        type="text"
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={() => {
-                          if (editingName.trim()) {
-                            updateTimer(timer.id, { name: editingName.trim() });
-                          }
-                          setEditingTimerId(null);
-                          setEditingName('');
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            if (editingName.trim()) {
-                              updateTimer(timer.id, { name: editingName.trim() });
-                            }
-                            setEditingTimerId(null);
-                            setEditingName('');
-                          } else if (e.key === 'Escape') {
-                            setEditingTimerId(null);
-                            setEditingName('');
-                          }
-                        }}
-                        autoFocus
-                        style={{
-                          background: surface,
-                          border: `1px solid ${accent}`,
-                          borderRadius: "6px",
-                          color: text,
-                          fontSize: "13px",
-                          fontWeight: "500",
-                          padding: "6px 12px",
-                          textAlign: "center",
-                          outline: "none"
-                        }}
-                      />
-                    ) : (
-                      <div
-                        onClick={() => startEditingTimer(timer.id, timer.name)}
-                        style={{
-                          color: textDim,
-                          fontSize: timers.length === 1 ? '13px' : '10px',
-                          fontWeight: "500",
-                          cursor: "pointer",
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          transition: "all 0.15s ease",
-                          userSelect: 'none',
-                          WebkitUserSelect: 'none',
-                          MozUserSelect: 'none',
-                          msUserSelect: 'none',
-                          caretColor: 'transparent',
-                          letterSpacing: '0.8px',
-                          textTransform: 'uppercase'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.target.style.background = surfaceHover;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.target.style.background = "transparent";
-                        }}
-                      >
-                        {timer.name}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Current Task Input */}
-                  <input
-                    placeholder="What are you working on?"
-                    value={timer.currentTask || ''}
-                    onChange={(e) => updateTimer(timer.id, { currentTask: e.target.value })}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      borderBottom: `1px solid ${border}`,
-                      color: textDim,
-                      fontSize: '11px',
-                      textAlign: 'center',
-                      outline: 'none',
-                      width: '80%',
-                      padding: '2px 8px',
-                      marginBottom: '8px'
-                    }}
-                  />
-
-                  {/* Preset Buttons */}
-                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginBottom: '4px' }}>
-                    {PRESETS.map(preset => (
-                      <button
-                        key={preset.label}
-                        onClick={() => {
-                          if (!timer.running) {
-                            setTimers(prev => prev.map(t => t.id === timer.id ? {
-                              ...t,
-                              selectedPreset: preset.label,
-                              secsLeft: timer.phase === 'work' ? preset.work * 60 : preset.break * 60,
-                              workMin: preset.work,
-                              breakMin: preset.break
-                            } : t));
-                          }
-                        }}
-                        style={{
-                          background: timer.selectedPreset === preset.label
-                            ? 'rgba(224,123,79,0.2)'
-                            : 'transparent',
-                          border: `1px solid ${timer.selectedPreset === preset.label
-                            ? 'rgba(224,123,79,0.5)'
-                            : border}`,
-                          color: timer.selectedPreset === preset.label ? accentBlue : textDim,
-                          padding: '3px 8px',
-                          borderRadius: '6px',
-                          fontSize: '10px',
-                          fontWeight: '500',
-                          cursor: timer.running ? 'not-allowed' : 'pointer',
-                          opacity: timer.running ? 0.5 : 1,
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Countdown + Phase Label Container */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flex: 1 }}>
-                    {/* Minus Button */}
-                    <button
-                      onClick={() => {
-                        if (!timer.running) {
-                          setTimers(prev => prev.map(t => t.id === timer.id
-                            ? { ...t, secsLeft: Math.max(60, t.secsLeft - 60) }
-                            : t
-                          ));
-                        }
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: `1px solid ${border}`,
-                        color: textDim,
-                        width: '28px', height: '28px',
-                        borderRadius: '8px',
-                        cursor: timer.running ? 'not-allowed' : 'pointer',
-                        fontSize: '16px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        opacity: timer.running ? 0.3 : 1,
-                        transition: 'all 0.15s ease',
-                        flexShrink: 0
-                      }}>
-                      −
-                    </button>
-
-                    {/* Countdown and Phase */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                      {/* Timer Display */}
-                      <div className="countdown-display" style={{
-                        fontSize: isMobile ? '42px' : (timers.length === 1 ? '88px' : timers.length === 2 ? '64px' : '48px'),
-                        fontWeight: "200",
-                        color: text,
-                        letterSpacing: "-1px",
-                        fontVariantNumeric: "tabular-nums",
-                        margin: '0',
-                        lineHeight: '1',
-                        cursor: 'default',
-                        userSelect: 'none',
-                        WebkitUserSelect: 'none',
-                        MozUserSelect: 'none',
-                        msUserSelect: 'none',
-                        caretColor: 'transparent',
-                        pointerEvents: 'none'
-                      }}>
-                        {formatTime(timer.secsLeft)}
-                      </div>
-
-                      {/* Phase */}
-                      <div style={{
-                        color: timer.phase === "work" ? accentGreen : accentBlue,
-                        fontSize: timers.length === 1 ? '12px' : '9px',
-                        fontWeight: "500",
-                        letterSpacing: "0.8px",
-                        textTransform: "uppercase",
-                        margin: '0',
-                        padding: '0',
-                        cursor: 'default',
-                        userSelect: 'none',
-                        WebkitUserSelect: 'none',
-                        MozUserSelect: 'none',
-                        msUserSelect: 'none',
-                        caretColor: 'transparent',
-                        pointerEvents: 'none'
-                      }}>
-                        {timer.phase === "work" ? "Focus" : (timer.isLongBreak ? "Long Break" : "Rest")}
-                      </div>
-                    </div>
-
-                    {/* Plus Button */}
-                    <button
-                      onClick={() => {
-                        if (!timer.running) {
-                          setTimers(prev => prev.map(t => t.id === timer.id
-                            ? { ...t, secsLeft: Math.min(3600, t.secsLeft + 60) }
-                            : t
-                          ));
-                        }
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: `1px solid ${border}`,
-                        color: textDim,
-                        width: '28px', height: '28px',
-                        borderRadius: '8px',
-                        cursor: timer.running ? 'not-allowed' : 'pointer',
-                        fontSize: '16px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        opacity: timer.running ? 0.3 : 1,
-                        transition: 'all 0.15s ease',
-                        flexShrink: 0
-                      }}>
-                      +
-                    </button>
-                  </div>
-
-                  {/* Controls */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    {/* Start/Pause and Reset */}
-                    <div style={{ display: "flex", gap: "12px", justifyContent: "center", margin: '0' }}>
-                      <button
-                        onClick={() => toggleTimerRunning(timer.id)}
-                        style={{
-                          background: timer.running ? "rgba(224,123,79,0.15)" : accentBlue,
-                          border: timer.running ? `1px solid rgba(224,123,79,0.3)` : "none",
-                          color: timer.running ? accentBlue : "white",
-                          padding: isMobile ? '8px 12px' : (timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px'),
-                          cursor: "pointer",
-                          borderRadius: "10px",
-                          transition: "all 0.15s ease",
-                          fontWeight: "500",
-                          fontSize: isMobile ? '12px' : (timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px'),
-                          flex: 1
-                        }}
-                        onMouseEnter={(e) => {
-                          e.target.style.transform = "translateY(-1px)";
-                          if (!timer.running) {
-                            e.target.style.boxShadow = "0 0 0 3px rgba(224,123,79,0.2)";
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          e.target.style.transform = "translateY(0)";
-                          if (!timer.running) {
-                            e.target.style.boxShadow = "none";
-                          }
-                        }}
-                      >
-                        {timer.running ? 'Pause' : 'Start'}
-                      </button>
-                      <button
-                        onClick={() => resetTimer(timer.id)}
-                        style={{
-                          background: surface,
-                          border: `1px solid ${border}`,
-                          color: textDim,
-                          padding: isMobile ? '8px 12px' : (timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px'),
-                          cursor: "pointer",
-                          borderRadius: "10px",
-                          transition: "all 0.15s ease",
-                          fontWeight: "500",
-                          fontSize: isMobile ? '12px' : (timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px'),
-                          flex: 1
-                        }}
-                        onMouseEnter={(e) => {
-                          e.target.style.background = surfaceHover;
-                          e.target.style.borderColor = borderHover;
-                          e.target.style.transform = "translateY(-1px)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.target.style.background = surface;
-                          e.target.style.borderColor = border;
-                          e.target.style.transform = "translateY(0)";
-                        }}
-                      >
-                        Reset
-                      </button>
-                    </div>
-
-                    {/* Work/Break Toggle */}
-                    <div style={{ display: "flex", gap: "8px", justifyContent: "center", margin: '0' }}>
-                      <button
-                        onClick={() => togglePhase(timer.id, 'work')}
-                        style={{
-                          background: timer.phase === "work" ? "rgba(79,168,224,0.15)" : "transparent",
-                          border: timer.phase === "work" ? `1px solid rgba(79,168,224,0.3)` : `1px solid ${border}`,
-                          color: timer.phase === "work" ? accentGreen : textDim,
-                          padding: timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px',
-                          cursor: "pointer",
-                          borderRadius: "10px",
-                          transition: "all 0.15s ease",
-                          fontWeight: "500",
-                          fontSize: timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px',
-                          flex: 1
-                        }}
-                        onMouseEnter={(e) => {
-                          if (timer.phase !== "work") {
-                            e.target.style.background = surfaceHover;
-                            e.target.style.borderColor = borderHover;
-                            e.target.style.transform = "translateY(-1px)";
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (timer.phase !== "work") {
-                            e.target.style.background = "transparent";
-                            e.target.style.borderColor = border;
-                            e.target.style.transform = "translateY(0)";
-                          }
-                        }}
-                      >
-                        Work
-                      </button>
-                      <button
-                        onClick={() => togglePhase(timer.id, 'break')}
-                        style={{
-                          background: timer.phase === "break" ? "rgba(224,123,79,0.15)" : "transparent",
-                          border: timer.phase === "break" ? `1px solid rgba(224,123,79,0.3)` : `1px solid ${border}`,
-                          color: timer.phase === "break" ? accentBlue : textDim,
-                          padding: timers.length === 1 ? '12px 20px' : timers.length === 2 ? '10px 16px' : '7px 12px',
-                          cursor: "pointer",
-                          borderRadius: "10px",
-                          transition: "all 0.15s ease",
-                          fontWeight: "500",
-                          fontSize: timers.length === 1 ? '15px' : timers.length === 2 ? '13px' : '11px',
-                          flex: 1
-                        }}
-                        onMouseEnter={(e) => {
-                          if (timer.phase !== "break") {
-                            e.target.style.background = surfaceHover;
-                            e.target.style.borderColor = borderHover;
-                            e.target.style.transform = "translateY(-1px)";
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (timer.phase !== "break") {
-                            e.target.style.background = "transparent";
-                            e.target.style.borderColor = border;
-                            e.target.style.transform = "translateY(0)";
-                          }
-                        }}
-                      >
-                        Break
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Noise Section */}
-        {tab === "noise" && (
-          <div style={{ textAlign: "center", maxWidth: "480px" }}>
-            <h2 style={{
-              color: accent,
-              fontSize: "22px",
-              marginBottom: "32px",
-              fontWeight: "300",
-              letterSpacing: "2px"
-            }}>
-              Ambient Noise
-            </h2>
-            <div className="noise-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'center',
-              marginBottom: '24px'
-            }}>
-              {NOISE_TYPES.map(type => (
-                <button
-                  key={type}
-                  onClick={() => { setNoiseType(type); setNoiseOn(true); }}
-                  style={{
-                    background: noiseType === type && noiseOn ? accentBlue : surface,
-                    border: `1px solid ${noiseType === type && noiseOn ? accentBlue : border}`,
-                    color: noiseType === type && noiseOn ? "white" : textDim,
-                    padding: "14px 36px",
-                    cursor: "pointer",
-                    borderRadius: "100px",
-                    transition: "all 0.15s ease",
-                    fontWeight: "500",
-                    fontSize: "15px",
-                    textTransform: "capitalize"
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!(noiseType === type && noiseOn)) {
-                      e.target.style.background = surfaceHover;
-                      e.target.style.borderColor = borderHover;
-                      e.target.style.transform = "translateY(-1px)";
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!(noiseType === type && noiseOn)) {
-                      e.target.style.background = surface;
-                      e.target.style.borderColor = border;
-                      e.target.style.transform = "translateY(0)";
-                    }
-                  }}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-            
-            {/* Volume Slider */}
-            <div style={{ marginTop: '28px' }}>
-              <input
-                type='range'
-                min='0'
-                max='1'
-                step='0.01'
-                value={volume}
-                onChange={e => setVolume(parseFloat(e.target.value))}
-                style={{
-                  width: '260px',
-                  accentColor: '#E07B4F',
-                  cursor: 'pointer'
-                }}
-              />
-              <div style={{ fontSize: '13px', color: textDim, marginTop: '10px' }}>
-                Volume
-              </div>
-            </div>
-            
-            {noiseOn && (
-              <button
-                onClick={() => setNoiseOn(false)}
-                style={{
-                  background: surface,
-                  border: `1px solid ${border}`,
-                  color: textDim,
-                  padding: "12px 32px",
-                  cursor: "pointer",
-                  borderRadius: "10px",
-                  transition: "all 0.15s ease",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                  marginTop: "24px"
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.background = surfaceHover;
-                  e.target.style.borderColor = borderHover;
-                  e.target.style.transform = "translateY(-1px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = surface;
-                  e.target.style.borderColor = border;
-                  e.target.style.transform = "translateY(0)";
-                }}
-              >
-                Stop Noise
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Note Section */}
-        {tab === "note" && (
-          <div className="notes-container" style={{
-          textAlign: "center",
-          maxWidth: isMobile ? '100%' : "500px",
-          width: '100%',
-          padding: isMobile ? '0 16px' : '0',
-          boxSizing: 'border-box'
-        }}>
-            <h2 style={{
-              color: accent,
-              fontSize: "28px",
-              marginBottom: "40px",
-              fontWeight: "300",
-              letterSpacing: "2px"
-            }}>
-              Notes
-            </h2>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Type your notes here..."
-              style={{
-                width: "100%",
-                height: isMobile ? "180px" : "300px",
-                background: themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
-                backdropFilter: "blur(10px)",
-                border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-                color: text,
-                padding: "20px",
-                borderRadius: "16px",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-                fontSize: "16px",
-                resize: "none",
-                transition: "all 0.2s ease",
-                outline: "none"
-              }}
-              onFocus={(e) => {
-                e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.08)" : "rgba(40, 35, 29, 0.1)";
-                e.target.style.borderColor = accent;
-              }}
-              onBlur={(e) => {
-                e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)";
-                e.target.style.borderColor = themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)";
-              }}
-            />
-            <div style={{
-              display: "flex",
-              gap: "12px",
-              justifyContent: "center",
-              marginTop: "20px"
-            }}>
-              <button
-                onClick={() => {
-                  localStorage.setItem("pomodoros_note", note);
-                  // Brief visual feedback
-                  const button = event.target;
-                  button.textContent = "Saved!";
-                  setTimeout(() => {
-                    button.textContent = "Save";
-                  }, 1500);
-                }}
-                style={{
-                  background: themeMode === "dark" ? "rgba(255, 255, 255, 0.08)" : "rgba(40, 35, 29, 0.07)",
-                  backdropFilter: "blur(10px)",
-                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-                  color: accent,
-                  padding: "12px 24px",
-                  cursor: "pointer",
-                  borderRadius: "12px",
-                  transition: "all 0.2s ease",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                  letterSpacing: "1px",
-                  minWidth: "80px"
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(40, 35, 29, 0.1)";
-                  e.target.style.transform = "translateY(-1px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.08)" : "rgba(40, 35, 29, 0.07)";
-                  e.target.style.transform = "translateY(0)";
-                }}
-              >
-                Save
-              </button>
-              <button
-                onClick={() => {
-                  setNote("");
-                  localStorage.removeItem("pomodoros_note");
-                  // Brief visual feedback
-                  const button = event.target;
-                  button.textContent = "Cleared!";
-                  setTimeout(() => {
-                    button.textContent = "Clear";
-                  }, 1500);
-                }}
-                style={{
-                  background: themeMode === "dark" ? "rgba(255, 255, 255, 0.08)" : "rgba(40, 35, 29, 0.07)",
-                  backdropFilter: "blur(10px)",
-                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-                  color: accent,
-                  padding: "12px 24px",
-                  cursor: "pointer",
-                  borderRadius: "12px",
-                  transition: "all 0.2s ease",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                  letterSpacing: "1px",
-                  minWidth: "80px"
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(40, 35, 29, 0.1)";
-                  e.target.style.transform = "translateY(-1px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.08)" : "rgba(40, 35, 29, 0.07)";
-                  e.target.style.transform = "translateY(0)";
-                }}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Stopwatch Section */}
-        {tab === "stopwatch" && (
-          <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
-            <div className={`timer-grid ${stopwatches.length === 2 ? 'timer-grid-2' : 'timer-grid-4'}`} style={{
-              display: 'grid',
-              gridTemplateColumns: isMobile ? '1fr' : (stopwatches.length === 1 ? '1fr' : '1fr 1fr'),
-              gridTemplateRows: 'unset',
-              gap: '8px',
-              padding: isMobile ? '8px' : '10px 16px',
-              height: isMobile ? 'auto' : 'calc(100vh - 108px)',
-              maxHeight: isMobile ? 'calc(100vh - 128px)' : 'unset',
-              overflowY: isMobile ? 'auto' : 'hidden',
-              boxSizing: 'border-box',
-              width: '100%',
-              maxWidth: (!isMobile && stopwatches.length === 1) ? '520px' : '100%',
-              margin: (!isMobile && stopwatches.length === 1) ? '0 auto' : '0',
-              transition: 'all 0.3s ease'
-            }}>
-              {stopwatches.map(sw => (
-                <div key={sw.id} className="stopwatch-card" style={{
-                  background: themeMode === 'dark' ? 'rgba(17,17,24,0.8)' : 'rgba(220,216,208,0.9)',
-                  backdropFilter: 'blur(20px)',
-                  border: `1px solid ${border}`,
-                  borderTop: `2px solid ${accentGreen}`,
-                  borderRadius: '16px',
-                  padding: isMobile ? '12px 14px' : (stopwatches.length === 1 ? '28px 32px' : stopwatches.length === 2 ? '20px 24px' : '14px 16px'),
-                  maxHeight: isMobile ? '260px' : 'unset',
-                  height: isMobile ? 'auto' : '100%',
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  overflow: 'hidden',
-                  transition: 'all 0.3s ease'
-                }}>
-                  {/* Delete button */}
-                  {stopwatches.length > 1 && (
-                    <button onClick={() => deleteStopwatch(sw.id)} style={{
-                      position: 'absolute', top: '12px', right: '12px',
-                      background: 'transparent', border: 'none',
-                      color: textDim, width: '24px', height: '24px',
-                      borderRadius: '6px', cursor: 'pointer',
-                      fontSize: '14px', display: 'flex',
-                      alignItems: 'center', justifyContent: 'center'
-                    }}>×</button>
-                  )}
-
-                  {/* Stopwatch name */}
-                  <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-                    {editingTimerId === sw.id ? (
-                      <input
-                        type="text"
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={() => {
-                          if (editingName.trim()) {
-                            setStopwatches(prev => prev.map(s =>
-                              s.id === sw.id ? { ...s, name: editingName.trim() } : s
-                            ));
-                          }
-                          setEditingTimerId(null);
-                          setEditingName('');
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            if (editingName.trim()) {
-                              setStopwatches(prev => prev.map(s =>
-                                s.id === sw.id ? { ...s, name: editingName.trim() } : s
-                              ));
-                            }
-                            setEditingTimerId(null);
-                            setEditingName('');
-                          } else if (e.key === 'Escape') {
-                            setEditingTimerId(null);
-                            setEditingName('');
-                          }
-                        }}
-                        autoFocus
-                        style={{
-                          background: surface,
-                          border: `1px solid ${accent}`,
-                          borderRadius: '6px',
-                          color: text,
-                          fontSize: '11px',
-                          fontWeight: '500',
-                          padding: '4px 10px',
-                          textAlign: 'center',
-                          outline: 'none',
-                          width: '80%'
-                        }}
-                      />
-                    ) : (
-                      <div
-                        onClick={() => { setEditingTimerId(sw.id); setEditingName(sw.name); }}
-                        style={{
-                          color: textDim,
-                          fontSize: stopwatches.length === 1 ? '13px' : '10px',
-                          fontWeight: '500',
-                          cursor: 'pointer',
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          letterSpacing: '0.8px',
-                          textTransform: 'uppercase',
-                          userSelect: 'none',
-                          transition: 'all 0.15s ease',
-                          display: 'inline-block'
-                        }}
-                        onMouseEnter={(e) => e.target.style.background = surfaceHover}
-                        onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                      >
-                        {sw.name}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Elapsed time display */}
-                  <div style={{
-                    flex: 1, display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center', gap: '4px'
-                  }}>
-                    <div className="sw-display" style={{
-                      fontSize: isMobile ? '42px' : (stopwatches.length === 1 ? '88px' : stopwatches.length === 2 ? '64px' : '48px'),
-                      fontWeight: '200', color: text, letterSpacing: '-1px',
-                      fontVariantNumeric: 'tabular-nums', lineHeight: '1',
-                      userSelect: 'none', pointerEvents: 'none'
-                    }}>
-                      {formatStopwatchTime(sw.elapsed)}
-                    </div>
-                    <div style={{
-                      color: accentGreen, fontSize: '10px', fontWeight: '500',
-                      letterSpacing: '2px', textTransform: 'uppercase'
-                    }}>
-                      {sw.running ? 'COUNTING' : sw.elapsed > 0 ? 'PAUSED' : 'READY'}
-                    </div>
-
-                    {/* Laps display — show last 3 laps */}
-                    {sw.laps.length > 0 && (
-                      <div style={{
-                        marginTop: '8px', width: '100%', maxWidth: '280px'
-                      }}>
-                        {sw.laps.slice(-3).map(lap => (
-                          <div key={lap.number} style={{
-                            display: 'flex', justifyContent: 'space-between',
-                            fontSize: '10px', color: textDim,
-                            padding: '2px 8px',
-                            borderBottom: `1px solid ${border}` 
-                          }}>
-                            <span>Lap {lap.number}</span>
-                            <span>{formatStopwatchTime(lap.split)}</span>
-                            <span style={{ opacity: 0.6 }}>{formatStopwatchTime(lap.total)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Controls */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {/* Start/Pause + Lap */}
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        onClick={() => sw.running ? pauseStopwatch(sw.id) : startStopwatch(sw.id)}
-                        style={{
-                          background: sw.running ? 'rgba(224,123,79,0.15)' : accentBlue,
-                          border: sw.running ? '1px solid rgba(224,123,79,0.3)' : 'none',
-                          color: sw.running ? accentBlue : 'white',
-                          padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
-                          borderRadius: '10px', cursor: 'pointer',
-                          fontWeight: '500',
-                          fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
-                          flex: 1, transition: 'all 0.15s ease'
-                        }}>
-                        {sw.running ? 'Pause' : 'Start'}
-                      </button>
-                      <button
-                        onClick={() => lapStopwatch(sw.id)}
-                        disabled={!sw.running}
-                        style={{
-                          background: 'transparent',
-                          border: `1px solid ${border}`,
-                          color: sw.running ? text : textDim,
-                          padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
-                          borderRadius: '10px', cursor: sw.running ? 'pointer' : 'not-allowed',
-                          fontWeight: '500',
-                          fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
-                          flex: 1, transition: 'all 0.15s ease',
-                          opacity: sw.running ? 1 : 0.4
-                        }}>
-                        Lap
-                      </button>
-                    </div>
-                    {/* Reset */}
-                    <button
-                      onClick={() => resetStopwatch(sw.id)}
-                      style={{
-                        background: surface,
-                        border: `1px solid ${border}`,
-                        color: textDim,
-                        padding: stopwatches.length === 1 ? '12px 20px' : stopwatches.length === 2 ? '10px 16px' : '7px 12px',
-                        borderRadius: '10px', cursor: 'pointer',
-                        fontWeight: '500',
-                        fontSize: stopwatches.length === 1 ? '15px' : stopwatches.length === 2 ? '13px' : '11px',
-                        width: '100%', transition: 'all 0.15s ease'
-                      }}>
-                      Reset
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Stats Section */}
-        {tab === "stats" && (
-          <div style={{
-              textAlign: 'center',
-              maxWidth: '680px',
-              margin: '0 auto',
-              width: '100%',
-              height: '100%',
-              overflowY: 'auto',
-              paddingBottom: '20px'
-            }}>
-            <h2 style={{
-              color: textDim,
-              fontSize: "13px",
-              marginBottom: "32px",
-              fontWeight: "500",
-              letterSpacing: "2px",
-              textTransform: "uppercase"
-            }}>
-              Today's Stats
-            </h2>
-            
-                        
-            {/* Overall Stats Grid */}
-            <div className="stats-grid stats-row" style={{
-              background: surface,
-              border: `1px solid ${border}`,
-              padding: "12px",
-              borderRadius: "16px",
-              textAlign: "center"
-            }}>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: isMobile ? '1fr 1fr' : "repeat(4, 1fr)",
-                gap: isMobile ? '8px' : "12px",
-                alignItems: "stretch"
-              }}>
-                {/* Total Focus Time */}
-                <div style={{
-                  background: surface,
-                  padding: "12px 20px",
-                  borderRadius: "16px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  minHeight: "80px"
-                }}>
-                  <div style={{
-                    color: textDim,
-                    fontSize: "10px",
-                    letterSpacing: "0.8px",
-                    marginBottom: "8px",
-                    textTransform: "uppercase",
-                    fontWeight: "500"
-                  }}>
-                    Total Focus Time
-                  </div>
-                  <div style={{
-                    fontSize: "22px",
-                    fontWeight: "300",
-                    color: text,
-                    lineHeight: "1"
-                  }}>
-                    {formatTime(totalWorkSecs)}
-                  </div>
-                </div>
-                
-                {/* Total Break Time */}
-                <div style={{
-                  background: surface,
-                  padding: "12px 20px",
-                  borderRadius: "16px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  minHeight: "80px"
-                }}>
-                  <div style={{
-                    color: textDim,
-                    fontSize: "10px",
-                    letterSpacing: "0.8px",
-                    marginBottom: "8px",
-                    textTransform: "uppercase",
-                    fontWeight: "500"
-                  }}>
-                    Total Break Time
-                  </div>
-                  <div style={{
-                    fontSize: "22px",
-                    fontWeight: "300",
-                    color: text,
-                    lineHeight: "1"
-                  }}>
-                    {formatTime(totalBreakSecs)}
-                  </div>
-                </div>
-                
-                {/* Total Cycles Completed */}
-                <div style={{
-                  background: surface,
-                  padding: "12px 20px",
-                  borderRadius: "16px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  minHeight: "80px"
-                }}>
-                  <div style={{
-                    color: textDim,
-                    fontSize: "10px",
-                    letterSpacing: "0.8px",
-                    marginBottom: "8px",
-                    textTransform: "uppercase",
-                    fontWeight: "500"
-                  }}>
-                    Total Cycles Completed
-                  </div>
-                  <div style={{
-                    fontSize: "22px",
-                    fontWeight: "300",
-                    color: text,
-                    lineHeight: "1"
-                  }}>
-                    {totalCycles}
-                  </div>
-                </div>
-                
-                {/* Focus Score */}
-                <div style={{
-                  background: surface,
-                  padding: "12px 20px",
-                  borderRadius: "16px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  minHeight: "80px"
-                }}>
-                  <div style={{
-                    color: textDim,
-                    fontSize: "10px",
-                    letterSpacing: "0.8px",
-                    marginBottom: "8px",
-                    textTransform: "uppercase",
-                    fontWeight: "500"
-                  }}>
-                    Focus Score
-                  </div>
-                  <div style={{
-                    fontSize: "22px",
-                    fontWeight: "300",
-                    color: focusScore === 100 ? "#FFD700" : text,
-                    lineHeight: "1"
-                  }}>
-                    {focusScore}%
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Stats Buttons */}
-            <div style={{
-              display: 'flex',
-              gap: '8px',
-              justifyContent: 'center',
-              marginTop: '8px',
-              flexWrap: 'wrap'
-            }}>
-              <button
-                onClick={clearStats}
-                title="Reset all timer statistics"
-                style={{
-                  background: themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
-                  backdropFilter: "blur(10px)",
-                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-                  color: textDim,
-                  padding: "10px 16px",
-                  cursor: "pointer",
-                  borderRadius: "12px",
-                  transition: "all 0.2s ease",
-                  fontWeight: "500",
-                  fontSize: "12px",
-                  letterSpacing: "1px"
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(44, 44, 44, 0.1)";
-                  e.target.style.transform = "translateY(-1px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)";
-                  e.target.style.transform = "translateY(0)";
-                }}
-              >
-                Clear Stats
-              </button>
-              <button
-                onClick={exportCSV}
-                title="Download stats as Excel-compatible CSV file"
-                style={{
-                  background: themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
-                  backdropFilter: "blur(10px)",
-                  border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-                  color: textDim,
-                  padding: "10px 16px",
-                  cursor: "pointer",
-                  borderRadius: "12px",
-                  transition: "all 0.2s ease",
-                  fontWeight: "500",
-                  fontSize: "12px",
-                  letterSpacing: "1px"
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(44, 44, 44, 0.1)";
-                  e.target.style.transform = "translateY(-1px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)";
-                  e.target.style.transform = "translateY(0)";
-                }}
-              >
-                Export CSV
-              </button>
-              <button
-                onClick={shareOnX}
-                title="Share your focus session on X"
-                style={{
-                  background: 'rgba(0,0,0,0.9)',
-                  color: '#ffffff',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '10px',
-                  padding: '8px 18px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  letterSpacing: '0.3px',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.transform = "translateY(-1px)";
-                  e.target.style.borderColor = "rgba(255,255,255,0.2)";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.transform = "translateY(0)";
-                  e.target.style.borderColor = "rgba(255,255,255,0.1)";
-                }}
-              >
-                Share on X
-              </button>
-              <button
-                onClick={shareAsImage}
-                title="Share as image"
-                style={{
-                  background: 'rgba(0,0,0,0.9)',
-                  color: '#ffffff',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '10px',
-                  padding: '8px 18px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  letterSpacing: '0.3px',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.transform = "translateY(-1px)";
-                  e.target.style.borderColor = "rgba(255,255,255,0.2)";
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.transform = "translateY(0)";
-                  e.target.style.borderColor = "rgba(255,255,255,0.1)";
-                }}
-              >
-                Share as Image
-              </button>
-            </div>
-
-            {/* Per Task Breakdown */}
-            {timers.length > 0 && (
-              <div className="task-breakdown-grid" style={{
-                display: 'grid',
-                gridTemplateColumns: isMobile ? '1fr' : (timers.length > 2 ? '1fr 1fr' : '1fr'),
-                gap: '8px',
-                marginTop: '8px'
-              }}>
-                {timers.map((timer) => (
-                  <div key={timer.id} style={{
-                    background: themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
-                    backdropFilter: "blur(10px)",
-                    border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-                    padding: "12px",
-                    borderRadius: "12px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center"
-                  }}>
-                    <div style={{
-                      color: accent,
-                      fontSize: "14px",
-                      fontWeight: "500",
-                      flex: 1,
-                      textAlign: "left"
-                    }}>
-                      {timer.name}
-                    </div>
-                    <div style={{
-                      display: "flex",
-                      gap: "16px",
-                      alignItems: "center"
-                    }}>
-                      <div style={{
-                        textAlign: "center"
-                      }}>
-                        <div style={{
-                          color: textDim,
-                          fontSize: "10px",
-                          letterSpacing: "1px",
-                          marginBottom: "2px",
-                          textTransform: "uppercase"
-                        }}>
-                          Work
-                        </div>
-                        <div style={{ 
-                          color: accent, 
-                          fontSize: "14px", 
-                          fontWeight: "300",
-                          fontVariantNumeric: "tabular-nums"
-                        }}>
-                          {formatTime(timer.totalWorkSeconds)}
-                        </div>
-                      </div>
-                      <div style={{
-                        textAlign: "center"
-                      }}>
-                        <div style={{
-                          color: textDim,
-                          fontSize: "10px",
-                          letterSpacing: "1px",
-                          marginBottom: "2px",
-                          textTransform: "uppercase"
-                        }}>
-                          Break
-                        </div>
-                        <div style={{ 
-                          color: accent, 
-                          fontSize: "14px", 
-                          fontWeight: "300",
-                          fontVariantNumeric: "tabular-nums"
-                        }}>
-                          {formatTime(timer.totalBreakSeconds)}
-                        </div>
-                      </div>
-                      <div style={{
-                        textAlign: "center"
-                      }}>
-                        <div style={{
-                          color: textDim,
-                          fontSize: "10px",
-                          letterSpacing: "1px",
-                          marginBottom: "2px",
-                          textTransform: "uppercase"
-                        }}>
-                          Cycles
-                        </div>
-                        <div style={{ 
-                          color: accent, 
-                          fontSize: "14px", 
-                          fontWeight: "300",
-                          fontVariantNumeric: "tabular-nums"
-                        }}>
-                          {timer.cyclesCompleted || 0}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Daily Summary */}
-            <div style={{
-              background: themeMode === "dark" ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
-              backdropFilter: "blur(10px)",
-              border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-              borderRadius: "16px",
-              padding: "20px",
-              marginTop: "16px"
-            }}>
-              <h3 style={{
-                color: textDim,
-                fontSize: "11px",
-                letterSpacing: "1.5px",
-                textTransform: "uppercase",
-                fontWeight: "500",
-                marginBottom: "12px",
-                textAlign: "center"
-              }}>
-                Daily Report
-              </h3>
-              <div style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "8px"
-              }}>
-                <div style={{ color: text, fontSize: "12px", fontWeight: "500" }}>
-                  {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </div>
-                <div style={{
-                  color: accentBlue,
-                  fontSize: "14px",
-                  fontWeight: "600",
-                  fontVariantNumeric: "tabular-nums"
-                }}>
-                  {formatTime(totalWorkSecs)}
-                </div>
-              </div>
-              <div style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "12px"
-              }}>
-                <div style={{ color: textDim, fontSize: "11px", fontWeight: "500" }}>
-                  Total Cycles
-                </div>
-                <div style={{
-                  color: text,
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  fontVariantNumeric: "tabular-nums"
-                }}>
-                  {timers.reduce((sum, t) => sum + (t.cyclesCompleted || 0), 0)}
-                </div>
-              </div>
-              <div style={{ marginBottom: "8px" }}>
-                <div style={{
-                  color: textDim,
-                  fontSize: "10px",
-                  fontWeight: "500",
-                  marginBottom: "4px"
-                }}>
-                  Daily Goal Progress (4 hours)
-                </div>
-                <div style={{
-                  background: border,
-                  borderRadius: "100px",
-                  height: "8px",
-                  width: "100%",
-                  marginTop: "8px"
-                }}>
-                  <div style={{
-                    background: accentBlue,
-                    borderRadius: "100px",
-                    height: "8px",
-                    width: `${Math.min((totalWorkSecs / (4 * 3600)) * 100, 100)}%`,
-                    transition: "width 0.5s ease"
-                  }} />
-                </div>
-              </div>
-            </div>
-
-            {/* Stopwatch Sessions */}
-            {stopwatches.some(sw => sw.elapsed > 0) && (
-              <div style={{ marginTop: '8px' }}>
-                <div style={{
-                  color: textDim, fontSize: '11px', letterSpacing: '1.5px',
-                  textTransform: 'uppercase', fontWeight: '500',
-                  marginBottom: '8px', textAlign: 'center'
-                }}>Stopwatch Sessions</div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: stopwatches.length > 2 ? '1fr 1fr' : '1fr',
-                  gap: '8px'
-                }}>
-                  {stopwatches.filter(sw => sw.elapsed > 0).map(sw => (
-                    <div key={sw.id} style={{
-                      background: themeMode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(40,35,29,0.05)',
-                      border: `1px solid ${border}`,
-                      borderLeft: `3px solid ${accentGreen}`,
-                      padding: '12px', borderRadius: '12px',
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                    }}>
-                      <div style={{ color: accent, fontSize: '13px', fontWeight: '500' }}>
-                        {sw.name}
-                      </div>
-                      <div style={{ display: 'flex', gap: '16px' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ color: textDim, fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '2px' }}>Elapsed</div>
-                          <div style={{ color: accent, fontSize: '14px', fontWeight: '300', fontVariantNumeric: 'tabular-nums' }}>
-                            {formatStopwatchTime(sw.elapsed)}
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ color: textDim, fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '2px' }}>Laps</div>
-                          <div style={{ color: accent, fontSize: '14px', fontWeight: '300' }}>
-                            {sw.laps.length}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-      {/* Visual Reports Section */}
-      <div style={{
-        background: themeMode === 'dark' ? "rgba(255, 255, 255, 0.05)" : "rgba(40, 35, 29, 0.05)",
-        backdropFilter: "blur(10px)",
-        border: `1px solid ${themeMode === "dark" ? "rgba(200,200,200,0.08)" : "rgba(40,35,29,0.1)"}`,
-        borderRadius: "16px",
-        padding: "24px",
-        marginTop: "20px"
+        gap: 0,
+        position: 'relative',
       }}>
-        <h3 style={{
-          color: textDim,
-          fontSize: "11px",
-          letterSpacing: "1.5px",
-          textTransform: "uppercase",
-          fontWeight: "500",
-          marginBottom: "16px",
-          textAlign: "center"
-        }}>
-          📊 Visual Reports
-        </h3>
-        
-        {/* Today's Focus Time Bar Chart */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
-            Today's Focus Time
+        {/* Delete button */}
+        {count > 1 && (
+          <button onClick={() => removeTimer(timer.id)}
+            style={{ position:'absolute', top:8, right:10, background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:20, lineHeight:1, padding:'0 4px' }}
+            onMouseEnter={e => e.currentTarget.style.color='#fff'}
+            onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.4)'}>
+            ×
+          </button>
+        )}
+
+        {/* Name — editable */}
+        {editingId === timer.id ? (
+          <input
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            onBlur={() => { if (editName.trim()) updateTimerField(timer.id, 'name', editName.trim()); setEditingId(null) }}
+            onKeyDown={e => { if (e.key==='Enter'||e.key==='Escape'){if(editName.trim())updateTimerField(timer.id,'name',editName.trim());setEditingId(null)} }}
+            autoFocus
+            style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, textAlign:'center', marginBottom:8, letterSpacing:1, width:160 }}
+          />
+        ) : (
+          <div
+            onClick={() => { setEditingId(timer.id); setEditName(timer.name) }}
+            style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.75)', letterSpacing:1.5, textTransform:'uppercase', cursor:'pointer', marginBottom:6, padding:'3px 10px', borderRadius:5 }}
+            onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.12)'}
+            onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+            {timer.name}
           </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            height: '80px',
-            gap: '4px',
-            marginBottom: '8px'
-          }}>
-            {[...Array(24)].map((_, hour) => {
-              const hourFocusTime = Math.random() * 60; // Simulated data
-              const height = (hourFocusTime / 60) * 80;
-              return (
-                <div
-                  key={hour}
-                  style={{
-                    flex: 1,
-                    background: hourFocusTime > 0 ? accentBlue : 'transparent',
-                    border: hourFocusTime > 0 ? 'none' : `1px solid ${border}`,
-                    borderRadius: '2px',
-                    height: `${height}px`,
-                    minHeight: '2px'
-                  }}
-                  title={`${hour}:00 - ${Math.round(hourFocusTime)} min`}
-                />
-              );
-            })}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', color: textDim }}>
-            <span>12am</span>
-            <span>6am</span>
-            <span>12pm</span>
-            <span>6pm</span>
-            <span>11pm</span>
-          </div>
+        )}
+
+        {/* Task line */}
+        <input
+          value={timer.task}
+          onChange={e => updateTimerField(timer.id, 'task', e.target.value)}
+          placeholder="What are you working on?"
+          style={{ background:'transparent', border:'none', borderBottom:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.7)', fontSize:12, textAlign:'center', width:'85%', padding:'2px 6px', marginBottom:10, caretColor:'#fff' }}
+        />
+
+        {/* Mode tabs — per timer */}
+        <div style={{ display:'flex', gap:3, marginBottom:12 }}>
+          {[{k:'pomodoro',l:'Pomodoro'},{k:'shortBreak',l:'Short Break'},{k:'longBreak',l:'Long Break'}].map(({k,l}) => (
+            <button key={k}
+              onClick={() => changeTimerPhase(timer.id, k)}
+              style={{ background: timer.mode===k?'rgba(0,0,0,0.35)':'transparent', border:`1px solid ${timer.mode===k?'rgba(255,255,255,0.45)':'rgba(255,255,255,0.18)'}`, color: timer.mode===k?'#fff':'rgba(255,255,255,0.5)', padding:'4px 10px', borderRadius:20, fontSize:10, fontWeight:700, letterSpacing:.5 }}>
+              {l}
+            </button>
+          ))}
         </div>
-        
-        {/* Daily Goal Progress */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
-            Daily Goal Progress ({dailyGoal}h)
-          </div>
-          <div style={{
-            background: border,
-            borderRadius: "100px",
-            height: "12px",
-            width: "100%",
-            marginBottom: '8px'
-          }}>
-            <div style={{
-              background: accentBlue,
-              borderRadius: "100px",
-              height: "12px",
-              width: `${Math.min((totalWorkSecs / (dailyGoal * 3600)) * 100, 100)}%`,
-              transition: "width 0.5s ease"
-            }} />
-          </div>
-          <div style={{ textAlign: 'center', fontSize: '12px', color: text }}>
-            {Math.round((totalWorkSecs / (dailyGoal * 3600)) * 100)}% Complete
-          </div>
-        </div>
-        
-        {/* Best Streak */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
-            Best Streak
-          </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px'
-          }}>
-            <span style={{ fontSize: '24px' }}>🔥</span>
-            <div style={{
-              fontSize: '20px',
-              fontWeight: '600',
-              color: accent
-            }}>
-              {Math.max(streak, 7)} days
+
+        {/* Countdown */}
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:14 }}>
+          <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.max(60,timer.secsLeft-60))}
+            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:30, height:30, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center' }}
+            disabled={timer.running}>−</button>
+
+          <div style={{ textAlign:'center' }}>
+            <div style={{ fontSize:digitPx, fontWeight:700, color:'#fff', letterSpacing:-4, lineHeight:1, userSelect:'none', fontVariantNumeric:'tabular-nums', animation: timer.running?'none':'none' }}>
+              {fmtTime(timer.secsLeft)}
             </div>
           </div>
+
+          <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.min(3600,timer.secsLeft+60))}
+            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:30, height:30, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center' }}
+            disabled={timer.running}>+</button>
         </div>
-        
-        {/* Total Focus Time All Time */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
-            Total Focus Time (All Time)
-          </div>
-          <div style={{
-            fontSize: '18px',
-            fontWeight: '600',
-            color: text,
-            textAlign: 'center'
-          }}>
-            {formatTime(totalWorkSecs * 10)} {/* Simulated all-time data */}
-          </div>
-        </div>
-        
-        {/* Estimated Finish Time for Remaining Tasks */}
-        {tasks.filter(t => !t.done).length > 0 && (
-          <div>
-            <div style={{ color: textDim, fontSize: '10px', marginBottom: '8px' }}>
-              Estimated Finish Time
-            </div>
-            <div style={{
-              background: themeMode === 'dark' ? 'rgba(224,123,79,0.1)' : 'rgba(224,123,79,0.05)',
-              border: `1px solid ${border}`,
-              borderRadius: '8px',
-              padding: '12px',
-              textAlign: 'center'
-            }}>
-              <div style={{
-                fontSize: '16px',
-                fontWeight: '600',
-                color: accent
-              }}>
-                {Math.ceil(tasks.filter(t => !t.done).reduce((sum, t) => 
-                  sum + (t.estimatedPomodoros - t.completedPomodoros), 0
-                ) * (globalWorkMin || 25) / 60)} hours
-              </div>
-              <div style={{ fontSize: '10px', color: textDim, marginTop: '4px' }}>
-                {tasks.filter(t => !t.done).length} tasks remaining
-              </div>
-            </div>
+
+        {/* START / PAUSE */}
+        <button
+          onClick={() => toggleTimer(timer.id)}
+          style={{ background:'#fff', color: bgColor, border:'none', padding: isLarge?'16px 64px':isMed?'13px 44px':'10px 28px', borderRadius:4, fontSize: isLarge?18:isMed?15:13, fontWeight:900, letterSpacing:2, marginBottom:10, minWidth: isLarge?180:120 }}
+          onMouseEnter={e => e.currentTarget.style.opacity='0.88'}
+          onMouseLeave={e => e.currentTarget.style.opacity='1'}>
+          {timer.running ? 'PAUSE' : 'START'}
+        </button>
+
+        {/* Reset */}
+        <button
+          onClick={() => resetTimer(timer.id)}
+          style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.55)', fontSize:12, padding:'3px 10px' }}
+          onMouseEnter={e => e.currentTarget.style.color='#fff'}
+          onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.55)'}>
+          ↺ Reset
+        </button>
+
+        {/* Cycle count */}
+        {count <= 2 && (
+          <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)', marginTop:6 }}>
+            #{timer.cyclesDone} · {fmtTime(timer.totalFocusSecs)} focused
           </div>
         )}
       </div>
+    )
+  }
 
-      {/* Leaderboard Modal */}
-      {showLeaderboard && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
-          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }} onClick={() => setShowLeaderboard(false)}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
-            border: `1px solid ${border}`,
-            borderRadius: '20px',
-            padding: '32px',
-            width: '90%',
-            maxWidth: '480px',
-            maxHeight: '70vh',
-            overflowY: 'auto'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ color: accent, fontSize: '18px', fontWeight: '600', margin: 0 }}>
-                🏆 Weekly Leaderboard
-              </h2>
-              <button onClick={() => setShowLeaderboard(false)} style={{
-                background: 'transparent', border: 'none', color: textDim,
-                fontSize: '20px', cursor: 'pointer'
-              }}>×</button>
-            </div>
-            {loadingLeaderboard ? (
-              <div style={{ textAlign: 'center', color: textDim, padding: '40px' }}>Loading...</div>
-            ) : leaderboard.length === 0 ? (
-              <div style={{ textAlign: 'center', color: textDim, padding: '40px' }}>
-                No sessions this week yet. Be the first!
+  // ─── STOPWATCH CARD ──────────────────────────────────────────────────────────
+  const SWCard = ({ sw, count }) => {
+    const isLarge = count === 1
+    return (
+      <div style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.18)', borderTop:'3px solid rgba(255,255,255,0.6)', borderRadius:12, padding: isLarge?'32px 40px':'20px 24px', display:'flex', flexDirection:'column', alignItems:'center', position:'relative' }}>
+        {count > 1 && (
+          <button onClick={() => removeSW(sw.id)} style={{ position:'absolute', top:8, right:10, background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:20 }}
+            onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.4)'}>×</button>
+        )}
+        <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.7)', letterSpacing:1.5, textTransform:'uppercase', marginBottom:10 }}>{sw.name}</div>
+        <div style={{ fontSize: isLarge?110:70, fontWeight:700, color:'#fff', letterSpacing:-4, lineHeight:1, fontVariantNumeric:'tabular-nums', marginBottom:8 }}>{fmtHMS(sw.elapsed)}</div>
+        <div style={{ fontSize:10, fontWeight:600, letterSpacing:2, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', marginBottom:14 }}>
+          {sw.running ? 'COUNTING' : sw.elapsed > 0 ? 'PAUSED' : 'READY'}
+        </div>
+        {sw.laps.slice(-4).map(l => (
+          <div key={l.n} style={{ display:'flex', justifyContent:'space-between', width:'100%', maxWidth:260, fontSize:11, color:'rgba(255,255,255,0.55)', padding:'3px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', fontFamily:'monospace' }}>
+            <span>Lap {l.n}</span><span>+{fmtHMS(l.split)}</span><span style={{opacity:.6}}>{fmtHMS(l.total)}</span>
+          </div>
+        ))}
+        <div style={{ display:'flex', gap:8, marginTop:14 }}>
+          <button onClick={() => toggleSW(sw.id)} style={{ background:'#fff', color:bgColor, border:'none', padding:'13px 40px', borderRadius:4, fontSize:15, fontWeight:900, letterSpacing:2 }}
+            onMouseEnter={e=>e.currentTarget.style.opacity='.88'} onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
+            {sw.running ? 'STOP' : 'START'}
+          </button>
+          <button onClick={() => lapSW(sw.id)} disabled={!sw.running} style={{ background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.2)', color:sw.running?'#fff':'rgba(255,255,255,0.3)', padding:'13px 18px', borderRadius:4, fontSize:13, fontWeight:700, opacity:sw.running?1:.5 }}>Lap</button>
+          <button onClick={() => resetSW(sw.id)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', padding:'13px 12px', fontSize:13 }}
+            onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.5)'}>↺</button>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── HEATMAP COMPONENT ─────────────────────────────────────────────────────────
+  const HeatmapGrid = () => {
+    const days = []
+
+    for (let i = 119; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(d.getDate() - i)
+
+      const key = d.toISOString().split('T')[0]
+
+      const secs = heatmapData[key] || 0
+
+      let opacity = 0.08
+
+      if (secs > 900) opacity = 0.25
+      if (secs > 1800) opacity = 0.45
+      if (secs > 3600) opacity = 0.65
+      if (secs > 7200) opacity = 0.9
+
+      days.push(
+        <div
+          key={key}
+          title={`${key} - ${Math.round(secs / 60)} mins`}
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: 3,
+            background: `rgba(16,185,129,${opacity})` 
+          }}
+        />
+      )
+    }
+
+    return (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(20,14px)',
+          gap: 4,
+          justifyContent: 'center'
+        }}
+      >
+        {days}
+      </div>
+    )
+  }
+
+  // ─── RENDER ──────────────────────────────────────────────────────────────────
+  return (
+    <div style={{
+      background: bgColor,
+      width: '100vw',
+      height: '100vh',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      color: '#fff',
+      fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      transition: 'background 0.4s ease, color 0.3s ease',
+    }}>
+      {/* Animated mesh background */}
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 0, pointerEvents: 'none',
+        background: `
+          radial-gradient(circle at 15% 15%, ${accentColor}22 0%, transparent 45%),
+          radial-gradient(circle at 85% 85%, ${accentColor}14 0%, transparent 45%),
+          radial-gradient(circle at 50% 50%, rgba(99,102,241,0.06) 0%, transparent 60%)
+        `,
+        filter: 'blur(60px)',
+        animation: 'meshFloat 8s ease-in-out infinite',
+        opacity: meshOpacity,
+      }}/>
+
+      {/* Main content wrapper */}
+      <div style={{
+        position: 'relative',
+        zIndex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        width: '100%',
+        overflow: 'hidden',
+      }}>
+        {/* ══ HEADER ══════════════════════════════════════════════════════════════ */}
+        <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: isDark ? 'rgba(15,23,42,0.9)' : 'rgba(241,245,249,0.9)', backdropFilter: 'blur(20px)', borderBottom: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Logo */}
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <img src="/icon-192.png" alt="" style={{ height: 52, width: 'auto', objectFit: 'contain', borderRadius: 10 }}
+              onError={e => { e.currentTarget.style.display='none' }} />
+            {streak > 0 && (
+              <span style={{ fontSize:13, fontWeight:700, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'4px 12px' }}>🔥 {streak}</span>
+            )}
+          </div>
+
+          {/* Right buttons */}
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            {installPrompt && (
+              <button onClick={async () => { installPrompt.prompt(); const {outcome} = await installPrompt.userChoice; if(outcome==='accepted') setInstallPrompt(null) }}
+                style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)', color:'#fff', padding:'6px 12px', borderRadius:6, fontSize:12, fontWeight:600 }}>
+                📲 Install
+              </button>
+            )}
+            <button
+              onClick={() => setIsDark(d => !d)}
+              title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: '50%',
+                border: isDark
+                  ? '1px solid rgba(255,255,255,0.15)'
+                  : '1px solid rgba(0,0,0,0.15)',
+                background: isDark
+                  ? 'rgba(255,255,255,0.08)'
+                  : 'rgba(0,0,0,0.06)',
+                color: isDark ? '#f8fafc' : '#0f172a',
+                fontSize: 17,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+              }}>
+              {isDark ? '☀️' : '🌙'}
+            </button>
+            {[
+              { icon:'🖥', tip:'Color Wash Mode', fn: openWashMode },
+              { icon:'⚙️', tip:'Settings', fn:()=>{ setTempSettings(settings); setShowSettings(true) } },
+              { icon:'?', tip:'Keyboard Shortcuts', fn:()=>setShowKeyHelp(true) },
+            ].map(b => (
+              <button key={b.icon} className="icon-btn" onClick={b.fn} title={b.tip}
+                style={{ background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)', color:'#94a3b8', width:38, height:38, borderRadius:'50%', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                {b.icon}
+              </button>
+            ))}
+            {isPro && <span style={{ background:'rgba(255,215,0,0.2)', border:'1px solid rgba(255,215,0,0.4)', color:'#FFD700', padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:800 }}>PRO ✨</span>}
+            {user ? (
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <img src={user.user_metadata?.avatar_url} alt="" style={{ width:32, height:32, borderRadius:'50%', border:'2px solid rgba(255,255,255,0.35)', cursor:'pointer' }}
+                  onClick={() => { setShowLeaderboard(true); loadLeaderboard() }} />
+                <button onClick={signOut} style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'5px 10px', borderRadius:6, fontSize:12 }}>Sign Out</button>
               </div>
             ) : (
-              leaderboard.map((entry, index) => (
-                <div key={index} style={{
-                  display: 'flex', alignItems: 'center', gap: '12px',
-                  padding: '12px', borderRadius: '12px',
-                  background: index === 0 ? 'rgba(224,123,79,0.1)' : 'transparent',
-                  borderBottom: `1px solid ${border}`, marginBottom: '4px'
-                }}>
-                  <div style={{
-                    width: '28px', textAlign: 'center',
-                    fontSize: index < 3 ? '18px' : '14px',
-                    color: index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : textDim
-                  }}>
-                    {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
+              <button onClick={signIn}
+                style={{ background: accentColor, border:'none', color:'#fff', padding:'8px 18px', borderRadius:20, fontSize:13, fontWeight:700 }}>
+                Sign In
+              </button>
+            )}
+          </div>
+        </div>
+
+      {/* ══ NAV TABS ════════════════════════════════════════════════════════════ */}
+      <div style={{ flexShrink: 0, padding: '8px 16px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto' }}>
+        <div style={{ display:'flex', background:isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)', border:isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.1)', borderRadius:100, padding:5, gap:2 }}>
+          {[{k:'timer',l:'Pomodoro'},{k:'sounds',l:'Sounds'},{k:'notes',l:'Notes'},{k:'stopwatch',l:'Stopwatch'},{k:'stats',l:'Report'}].map(t => (
+            <button key={t.k} className="tab-btn" onClick={()=>setTab(t.k)}
+              style={{ background:tab===t.k?accentColor:'transparent', color:tab===t.k?'#fff':'#64748b', border:'none', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:tab===t.k?700:500, letterSpacing:.3 }}>
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        {/* Add timer / stopwatch */}
+        {(tab==='timer'||tab==='stopwatch') && (
+          <button onClick={tab==='timer'?addTimer:addStopwatch}
+            disabled={(tab==='timer'?timers:stopwatches).length>=4}
+            style={{ background:isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:isDark ? '#94a3b8' : '#475569', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600, opacity:(tab==='timer'?timers:stopwatches).length>=4?.4:1 }}>
+            + Add {tab==='timer'?'Timer':'Stopwatch'}
+          </button>
+        )}
+
+        {/* Leaderboard shortcut */}
+        <button onClick={()=>{setShowLeaderboard(true);loadLeaderboard()}}
+          style={{ background:isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:isDark ? '#94a3b8' : '#475569', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600 }}>
+          🏆 Leaderboard
+        </button>
+      </div>
+
+      {/* ══ CONTENT ══════════════════════════════════════════════════════════════ */}
+      <div style={{
+        flex: 1,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '8px 16px 8px',
+        boxSizing: 'border-box',
+      }}>
+
+        {/* ── TIMER TAB ── */}
+        {tab==='timer' && (
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            height: '100%',
+          }}>
+            {/* Timer grid */}
+            <div className="timer-grid" style={{
+              display: 'grid',
+              gridTemplateColumns: timers.length === 1 ? '1fr' : '1fr 1fr',
+              gap: 12,
+              flex: 1,
+              overflow: 'hidden',
+              width: '100%',
+              maxWidth: timers.length === 1 ? 420 : '100%',
+              margin: '0 auto',
+              alignItems: 'center',
+              justifyItems: 'center',
+              transition: 'all 0.45s cubic-bezier(0.23,1,0.32,1)',
+            }}>
+              {(timers || []).map(t => <TimerCard key={t.id} timer={t} count={timers.length} />)}
+            </div>
+
+            {/* Active task indicator */}
+            <div style={{ textAlign:'center', marginBottom:20 }}>
+              {activeTask ? (
+                <>
+                  <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', letterSpacing:1, marginBottom:3 }}>#{activeTask.completedPomodoros||0} Currently working on</div>
+                  <div style={{ fontSize:16, fontWeight:700 }}>{activeTask.name}</div>
+                </>
+              ) : (
+                <div style={{ fontSize:14, color:'rgba(255,255,255,0.55)' }}>Time to focus!</div>
+              )}
+            </div>
+
+            {/* ── TASKS ── */}
+            {timers.length < 3 ? (
+              <div style={{ maxWidth: timers.length===1?520:900, margin:'0 auto', flexShrink: 0 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.08)', paddingBottom:10, marginBottom:12 }}>
+                <span style={{ fontSize:13, fontWeight:700, letterSpacing:1.5, color:textFaint, textTransform:'uppercase' }}>Tasks</span>
+                <span style={{ fontSize:12, color:textFaint }}>{pendingTasks.length} remaining{pendingTasks.length>0?` · ~${Math.ceil(pendingTasks.reduce((s,t)=>s+(t.estimatedPomodoros||1)-(t.completedPomodoros||0),0)*settings.pomodoroMin/60)}h`:''}</span>
+              </div>
+
+              {/* Task list */}
+              {tasks.map(task => (
+                <div key={task.id} className="task-row"
+                  onClick={() => setActiveTaskId(task.id===activeTaskId?null:task.id)}
+                  style={{ display:'flex', alignItems:'center', gap:10, background:activeTaskId===task.id
+                    ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)')
+                    : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)'), border:activeTaskId===task.id
+                    ? '1px solid ' + accentColor
+                    : (isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.07)'), borderRadius:12, padding:'13px 16px', marginBottom:8, cursor:'pointer', transition:'all .15s' }}>
+                  <input type="checkbox" checked={task.done}
+                    onClick={e=>e.stopPropagation()}
+                    onChange={e => setTasks(prev => prev.map(t => t.id===task.id?{...t,done:e.target.checked}:t))}
+                    style={{ width:16, height:16, cursor:'pointer', accentColor:textMain, flexShrink:0 }} />
+                  <div style={{ flex:1, fontSize:14, fontWeight:600, textDecoration:task.done?'line-through':'none', color:task.done?textFaint:textMain, fontFamily:"'Plus Jakarta Sans'" }}>
+                    {task.name}
                   </div>
-                  {entry.avatar_url && (
-                    <img src={entry.avatar_url} alt="" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
-                  )}
-                  <div style={{ flex: 1, color: accent, fontSize: '14px', fontWeight: '500' }}>
-                    {entry.username}
+                  <div style={{ display:'flex', gap:3, alignItems:'center' }}>
+                    {Array(task.estimatedPomodoros||1).fill(0).map((_,i)=>(
+                      <div key={i} style={{ width:8, height:8, borderRadius:'50%', background:i<(task.completedPomodoros||0)?accentColor:'rgba(255,255,255,0.15)' }}/>
+                    ))}
                   </div>
-                  <div style={{ color: accentBlue, fontSize: '14px', fontWeight: '600', fontVariantNumeric: 'tabular-nums' }}>
-                    {Math.floor(entry.total_focus_seconds / 3600)}h {Math.floor((entry.total_focus_seconds % 3600) / 60)}m
+                  <button onClick={e=>{e.stopPropagation();setTasks(prev=>prev.filter(t=>t.id!==task.id))}}
+                    style={{ background:isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:textFaint, fontSize:18, lineHeight:1, padding:'0 2px', flexShrink:0 }}
+                    onMouseEnter={e=>e.currentTarget.style.color=textDim}
+                    onMouseLeave={e=>e.currentTarget.style.color=textFaint}>×</button>
+                </div>
+              ))}
+
+              {/* Add task */}
+              <div style={{ border:isDark ? '2px dashed rgba(255,255,255,0.1)' : '2px dashed rgba(0,0,0,0.12)', borderRadius:12, padding:'14px 16px', cursor:'text', background:isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)' }}
+                onClick={()=>document.getElementById('pom-task-inp')?.focus()}>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  <span style={{ fontSize:20, color:textFaint, flexShrink:0 }}>＋</span>
+                  <input id="pom-task-inp" value={newTask} onChange={e=>setNewTask(e.target.value)}
+                    onKeyDown={e=>{if(e.key==='Enter'&&newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
+                    placeholder="Add Task"
+                    style={{ flex:1, background:'transparent', border:'none', color:textDim, fontSize:14, caretColor:textMain }} />
+                </div>
+                {newTask && (
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:12 }}>
+                    <span style={{ fontSize:12, color:textDim }}>Est. pomodoros:</span>
+                    <select value={newTaskEst} onChange={e=>setNewTaskEst(+e.target.value)}
+                      style={{ background:isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)', border:isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.25)', color:textMain, padding:'4px 8px', borderRadius:6, fontSize:13 }}>
+                      {Array.from({length:10},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}
+                    </select>
+                    <button onClick={()=>{if(newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
+                      style={{ background:accentColor, color:'#fff', border:'none', padding:'6px 16px', borderRadius:10, fontSize:13, fontWeight:700 }}>Save</button>
+                    <button onClick={()=>setNewTask('')}
+                      style={{ background:'transparent', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:textDim, padding:'6px 12px', borderRadius:10, fontSize:13 }}>Cancel</button>
+                  </div>
+                )}
+              </div>
+
+              {/* Templates */}
+              {templates.length > 0 && (
+                <div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', letterSpacing:1, marginBottom:6 }}>TEMPLATES</div>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                    {templates.map(t => (
+                      <button key={t.id} onClick={()=>setTasks(prev=>[...prev,{...t,id:Date.now(),completedPomodoros:0,done:false}])}
+                        style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.75)', padding:'4px 12px', borderRadius:20, fontSize:12 }}>
+                        {t.name}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              ))
+              )}
+            </div>
+            ) : (
+              timers.length >= 3 && activeTask && (
+                <div style={{ textAlign:'center', fontSize:12, color:'#475569', padding:'4px 0', flexShrink:0 }}>
+                  Focusing on: <strong style={{color:'#94a3b8'}}>{activeTask.name}</strong>
+                </div>
+              )
             )}
-            {user && (
-              <button
-                onClick={() => { syncStatsToCloud(user.id); setShowLeaderboard(false); }}
+          </div>
+        )}
+
+        {/* ── SOUNDS TAB ── */}
+        {tab==='sounds' && (
+          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+            <h2 style={{ fontWeight:300, fontSize:24, letterSpacing:1, marginBottom:28 }}>Ambient Noise</h2>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:24 }}>
+              {NOISE_OPTIONS.map(n => (
+                <button key={n.key} className="noise-btn"
+                  onClick={()=>{ setNoiseKey(n.key); setNoiseOn(true) }}
+                  style={{ background:noiseKey===n.key&&noiseOn?'rgba(0,0,0,0.4)':'rgba(0,0,0,0.18)', border:`1px solid ${noiseKey===n.key&&noiseOn?'rgba(255,255,255,0.6)':'rgba(255,255,255,0.2)'}`, color:noiseKey===n.key&&noiseOn?'#fff':'rgba(255,255,255,0.65)', padding:'18px 10px', borderRadius:10, fontSize:14, fontWeight:700, transition:'all .15s' }}>
+                  {n.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', letterSpacing:1.5, marginBottom:8 }}>VOLUME — {Math.round(volume*100)}%</div>
+              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={e=>setVolume(+e.target.value)}
+                style={{ width:220, accentColor:'#fff' }} />
+            </div>
+            {noiseOn && (
+              <button onClick={()=>setNoiseOn(false)}
+                style={{ background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.25)', color:'rgba(255,255,255,0.8)', padding:'11px 30px', borderRadius:8, fontSize:14, fontWeight:700 }}>
+                Stop Sound
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── NOTES TAB ── */}
+        {tab==='notes' && (
+          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', overflow:'hidden', padding:'0 16px' }}>
+            <h2 style={{ fontWeight:300, fontSize:24, letterSpacing:1, marginBottom:24 }}>Notes</h2>
+            <textarea value={note} onChange={e=>setNote(e.target.value)}
+              placeholder="Type your notes here..."
+              style={{ width:'100%', height: 'calc(100vh - 260px)', background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', padding:20, borderRadius:12, fontSize:15, lineHeight:1.75, resize:'vertical', caretColor:'#fff', transition:'border .2s' }}
+              onFocus={e=>e.target.style.borderColor='rgba(255,255,255,0.45)'}
+              onBlur={e=>e.target.style.borderColor='rgba(255,255,255,0.2)'} />
+            <div style={{ display:'flex', gap:10, justifyContent:'center', marginTop:14 }}>
+              <button onClick={()=>{ls.set('pom_note',note);showToast('Notes saved ✓')}}
+                style={{ background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'10px 26px', borderRadius:8, fontSize:14, fontWeight:700 }}>Save</button>
+              <button onClick={()=>{setNote('');ls.set('pom_note','')}}
+                style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.65)', padding:'10px 22px', borderRadius:8, fontSize:14 }}>Clear</button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STOPWATCH TAB ── */}
+        {tab==='stopwatch' && (
+          <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+            <div className="sw-grid" style={{
+              display: 'grid',
+              gridTemplateColumns: stopwatches.length === 1 ? '1fr' : '1fr 1fr',
+              gap: 12,
+              flex: 1,
+              overflow: 'hidden',
+              width: '100%',
+              maxWidth: stopwatches.length === 1 ? 420 : '100%',
+              margin: '0 auto',
+              alignItems: 'center',
+              justifyItems: 'center',
+              transition: 'all 0.45s cubic-bezier(0.23,1,0.32,1)',
+            }}>
+              {(stopwatches || []).map(sw => <SWCard key={sw.id} sw={sw} count={stopwatches.length} />)}
+            </div>
+          </div>
+        )}
+
+        {/* ── STATS TAB ── */}
+        {tab==='stats' && (
+          <div style={{ flex:1, overflowY:'auto', padding:'0 16px 16px' }}>
+            <h2 style={{ textAlign:'center', fontSize:13, fontWeight:700, letterSpacing:2, textTransform:'uppercase', color:'rgba(255,255,255,0.7)', marginBottom:20 }}>Today's Report</h2>
+
+            {/* Stat cards */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:10, marginBottom:16 }}>
+              {[
+                {l:'Focus Time', v:fmtTime(totalFocusSecs)},
+                {l:'Break Time', v:fmtTime(totalBreakSecs)},
+                {l:'Cycles', v:totalCycles},
+                {l:'Focus Score', v:focusScore+'%'},
+              ].map(s=>(
+                <div key={s.l} className="stat-card" style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, padding:'18px 14px', textAlign:'center' }}>
+                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', letterSpacing:1, textTransform:'uppercase', marginBottom:8 }}>{s.l}</div>
+                  <div style={{ fontSize:28, fontWeight:300, fontVariantNumeric:'tabular-nums' }}>{s.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center', marginBottom:16 }}>
+              {[
+                {l:'Clear Stats', fn:()=>{setTimers(p=>p.map(t=>({...t,totalFocusSecs:0,totalBreakSecs:0,cyclesDone:0})));showToast('Stats cleared')}},
+                {l:'Export CSV', fn:exportCSV},
+                {l:'Share on X', fn:shareX},
+                {l:'🏆 Leaderboard', fn:()=>{setShowLeaderboard(true);loadLeaderboard()}},
+                user&&{l:'☁️ Sync to Cloud', fn:syncToCloud},
+              ].filter(Boolean).map(b=>(
+                <button key={b.l} onClick={b.fn}
+                  style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.22)', color:'rgba(255,255,255,0.8)', padding:'9px 16px', borderRadius:7, fontSize:13, fontWeight:700 }}
+                  onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.35)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0.2)'}>
+                  {b.l}
+                </button>
+              ))}
+            </div>
+
+            {/* Per-timer breakdown */}
+            {timers.map(t=>(
+              <div key={t.id} style={{ background:'rgba(0,0,0,0.15)', border:'1px solid rgba(255,255,255,0.12)', borderLeft:'3px solid rgba(255,255,255,0.5)', borderRadius:8, padding:'12px 16px', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
+                <span style={{ fontSize:14, fontWeight:700 }}>{t.name}</span>
+                <div style={{ display:'flex', gap:14, fontSize:12, color:'rgba(255,255,255,0.65)' }}>
+                  <span>Focus: {fmtTime(t.totalFocusSecs)}</span>
+                  <span>Break: {fmtTime(t.totalBreakSecs)}</span>
+                  <span>Cycles: {t.cyclesDone}</span>
+                </div>
+              </div>
+            ))}
+
+            {/* Daily goal */}
+            <div style={{ background:'rgba(0,0,0,0.18)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, padding:18, marginTop:12 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)', letterSpacing:1 }}>DAILY GOAL ({settings.dailyGoalHours}h)</span>
+                <span style={{ fontSize:12, fontWeight:700 }}>{Math.min(100,Math.round((totalFocusSecs/(settings.dailyGoalHours*3600))*100))}%</span>
+              </div>
+              <div style={{ background:'rgba(0,0,0,0.25)', borderRadius:100, height:8 }}>
+                <div style={{ background:'rgba(255,255,255,0.7)', borderRadius:100, height:8, width:`${Math.min(100,(totalFocusSecs/(settings.dailyGoalHours*3600))*100)}%`, transition:'width .5s' }}/>
+              </div>
+              {streak>0 && <div style={{ textAlign:'center', marginTop:12, fontSize:14 }}>🔥 <strong>{streak}</strong> day streak</div>}
+            </div>
+
+            {/* Focus Heatmap */}
+            <div
+              style={{
+                background: 'rgba(0,0,0,0.18)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 10,
+                padding: 16,
+                marginTop: 14
+              }}
+            >
+              <div
                 style={{
-                  width: '100%', marginTop: '16px',
-                  background: accentBlue, border: 'none', color: 'white',
-                  padding: '12px', borderRadius: '12px', cursor: 'pointer',
-                  fontSize: '14px', fontWeight: '600'
-                }}>
+                  fontSize: 11,
+                  letterSpacing: 2,
+                  color: 'rgba(255,255,255,0.5)',
+                  marginBottom: 12,
+                  textTransform: 'uppercase'
+                }}
+              >
+                Focus Heatmap
+              </div>
+
+              <HeatmapGrid />
+
+              {weeklyInsights.bestHour && (
+                <div
+                  style={{
+                    marginTop: 14,
+                    textAlign: 'center',
+                    color: 'rgba(255,255,255,0.7)',
+                    fontSize: 13
+                  }}
+                >
+                  🧠 Best Focus Hour:
+                  <strong> {weeklyInsights.bestHour}:00 </strong>
+                  ({weeklyInsights.focusMinutes} mins)
+                </div>
+              )}
+            </div>
+
+            {/* AI Productivity Coach */}
+            <div
+              style={{
+                background: 'rgba(0,0,0,0.18)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 10,
+                padding: 16,
+                marginTop: 14
+              }}
+            >
+              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#fff' }}>🧠 AI Productivity Coach</h3>
+
+              {coachMessages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    marginBottom: 8,
+                    color: 'rgba(255,255,255,0.7)',
+                    fontSize: 13
+                  }}
+                >
+                  • {msg}
+                </div>
+              ))}
+            </div>
+
+            {/* RPG Level System */}
+            <div
+              style={{
+                background: 'rgba(0,0,0,0.18)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 10,
+                padding: 16,
+                marginTop: 14
+              }}
+            >
+              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#fff' }}>
+                🎮 Level {level} — {playerTitle}
+              </h3>
+
+              <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginBottom: 10 }}>
+                XP: {xp}
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 6,
+                  marginTop: 10
+                }}
+              >
+                {badges.map(badge => (
+                  <div
+                    key={badge}
+                    style={{
+                      background: 'rgba(16,185,129,0.15)',
+                      padding: '6px 10px',
+                      borderRadius: 20,
+                      fontSize: 12,
+                      color: '#fff',
+                      border: '1px solid rgba(16,185,129,0.3)'
+                    }}
+                  >
+                    {badge}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* ══ TOAST ══════════════════════════════════════════════════════════════ */}
+      {toast && (
+        <div style={{ position:'fixed', bottom:28, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.85)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:100, padding:'11px 26px', fontSize:14, fontWeight:600, zIndex:9999, backdropFilter:'blur(20px)', whiteSpace:'nowrap', animation:'fadeUp .25s ease', boxShadow:'0 4px 20px rgba(0,0,0,0.4)' }}>
+          {toast}
+        </div>
+      )}
+
+      {/* ══ SETTINGS MODAL ══════════════════════════════════════════════════════ */}
+      {showSettings && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={()=>setShowSettings(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:32, width:'90%', maxWidth:500, maxHeight:'85vh', overflowY:'auto', color:'#fff' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+              <h2 style={{ margin:0, fontSize:20, fontWeight:800 }}>Settings</h2>
+              <button onClick={()=>setShowSettings(false)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', fontSize:24, lineHeight:1 }}>×</button>
+            </div>
+
+            <div style={{ marginBottom:20, borderBottom:'1px solid rgba(255,255,255,0.1)', paddingBottom:20 }}>
+              <h3 style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, color:'rgba(255,255,255,0.5)', marginBottom:16 }}>TIMER (MINUTES)</h3>
+              {[
+                {l:'Pomodoro', k:'pomodoroMin', min:1, max:60},
+                {l:'Short Break', k:'shortBreakMin', min:1, max:30},
+                {l:'Long Break', k:'longBreakMin', min:5, max:60},
+                {l:'Long Break Every', k:'longBreakEvery', min:2, max:8, suffix:' pomodoros'},
+              ].map(f=>(
+                <div key={f.k} style={{ marginBottom:16 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, fontWeight:600, marginBottom:6 }}>
+                    <span>{f.l}</span>
+                    <span style={{ color:'rgba(255,255,255,0.6)' }}>{tempSettings[f.k]}{f.suffix||' min'}</span>
+                  </div>
+                  <input type="range" min={f.min} max={f.max} value={tempSettings[f.k]}
+                    onChange={e=>setTempSettings(p=>({...p,[f.k]:+e.target.value}))}
+                    style={{ width:'100%', accentColor:bgColor }} />
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginBottom:20, borderBottom:'1px solid rgba(255,255,255,0.1)', paddingBottom:20 }}>
+              <h3 style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, color:'rgba(255,255,255,0.5)', marginBottom:16 }}>AUTO START</h3>
+              {[
+                {l:'Auto-start Breaks', k:'autoStartBreaks'},
+                {l:'Auto-start Pomodoros', k:'autoStartPomodoros'},
+                {l:'Alarm Sound', k:'alarmSound'},
+                {l:'Browser Notifications', k:'browserNotifs'},
+              ].map(f=>(
+                <label key={f.k} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, cursor:'pointer', fontSize:14 }}>
+                  <span>{f.l}</span>
+                  <input type="checkbox" checked={tempSettings[f.k]}
+                    onChange={e=>setTempSettings(p=>({...p,[f.k]:e.target.checked}))}
+                    style={{ width:18, height:18, accentColor:bgColor, cursor:'pointer' }} />
+                </label>
+              ))}
+            </div>
+
+            <div style={{ marginBottom:24 }}>
+              <h3 style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, color:'rgba(255,255,255,0.5)', marginBottom:12 }}>DAILY GOAL</h3>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                {[1,2,4,6,8].map(h=>(
+                  <button key={h} onClick={()=>setTempSettings(p=>({...p,dailyGoalHours:h}))}
+                    style={{ background:tempSettings.dailyGoalHours===h?bgColor:'rgba(255,255,255,0.1)', border:`1px solid ${tempSettings.dailyGoalHours===h?'rgba(255,255,255,0.5)':'rgba(255,255,255,0.2)'}`, color:'#fff', padding:'7px 16px', borderRadius:20, fontSize:13, fontWeight:700 }}>
+                    {h}h
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={saveSettings}
+              style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:14, borderRadius:10, fontSize:15, fontWeight:800, letterSpacing:.5 }}>
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══ LEADERBOARD ══════════════════════════════════════════════════════════ */}
+      {showLeaderboard && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={()=>setShowLeaderboard(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:32, width:'90%', maxWidth:480, maxHeight:'75vh', overflowY:'auto', color:'#fff' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+              <h2 style={{ margin:0, fontSize:20, fontWeight:800 }}>🏆 Weekly Leaderboard</h2>
+              <button onClick={()=>setShowLeaderboard(false)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', fontSize:24, lineHeight:1 }}>×</button>
+            </div>
+
+            {!user && (
+              <div style={{ background:'rgba(255,255,255,0.07)', borderRadius:10, padding:16, marginBottom:16, textAlign:'center' }}>
+                <p style={{ marginBottom:12, color:'rgba(255,255,255,0.7)', fontSize:14 }}>Sign in to join the leaderboard and compete globally</p>
+                <button onClick={signIn} style={{ background:bgColor, border:'none', color:'#fff', padding:'10px 24px', borderRadius:8, fontSize:14, fontWeight:700 }}>Sign In with Google</button>
+              </div>
+            )}
+
+            {lbLoading ? (
+              <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.5)' }}>Loading...</div>
+            ) : leaderboard.length === 0 ? (
+              <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.5)' }}>No sessions this week yet — be the first!</div>
+            ) : leaderboard.map((e,i)=>(
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 10px', borderBottom:'1px solid rgba(255,255,255,0.07)', borderRadius:8, marginBottom:4, background:i<3?'rgba(255,255,255,0.04)':'transparent' }}>
+                <div style={{ width:30, textAlign:'center', fontSize:i<3?20:14 }}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</div>
+                {e.avatar_url && <img src={e.avatar_url} alt="" style={{ width:32, height:32, borderRadius:'50%' }}/>}
+                <div style={{ flex:1, fontSize:14, fontWeight:700 }}>{e.username||'Anonymous'}</div>
+                <div style={{ fontSize:14, fontWeight:800, fontVariantNumeric:'tabular-nums' }}>
+                  {Math.floor(e.total_focus_seconds/3600)}h {Math.floor((e.total_focus_seconds%3600)/60)}m
+                </div>
+              </div>
+            ))}
+
+            {user && (
+              <button onClick={()=>{syncToCloud();setShowLeaderboard(false)}}
+                style={{ width:'100%', marginTop:16, background:bgColor, border:'none', color:'#fff', padding:13, borderRadius:10, fontSize:14, fontWeight:800 }}>
                 Submit My Score
               </button>
             )}
@@ -3427,827 +1830,93 @@ export default function Pomodoros() {
         </div>
       )}
 
-      {/* Settings Modal */}
-      {showSettings && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
-          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }} onClick={() => setShowSettings(false)}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
-            border: `1px solid ${border}`,
-            borderRadius: '20px',
-            padding: '32px',
-            width: '90%',
-            maxWidth: '520px',
-            maxHeight: '80vh',
-            overflowY: 'auto'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ color: accent, fontSize: '18px', fontWeight: '600', margin: 0 }}>
-                ⚙️ Settings
-              </h2>
-              <button onClick={() => setShowSettings(false)} style={{
-                background: 'transparent', border: 'none', color: textDim,
-                fontSize: '20px', cursor: 'pointer'
-              }}>×</button>
-            </div>
-            
-            {/* Timer Settings */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
-                Timer Settings
-              </h3>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
-                  Work Duration: {globalWorkMin} min
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="60"
-                  value={globalWorkMin}
-                  onChange={(e) => setGlobalWorkMin(parseInt(e.target.value))}
-                  style={{ width: '100%' }}
-                />
+      {/* ══ KEYBOARD HELP ═══════════════════════════════════════════════════════ */}
+      {showKeyHelp && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={()=>setShowKeyHelp(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:32, width:'90%', maxWidth:380, color:'#fff', textAlign:'center' }}>
+            <div style={{ fontSize:44, marginBottom:14 }}>⌨️</div>
+            <h2 style={{ margin:'0 0 20px', fontSize:20, fontWeight:800 }}>Keyboard Shortcuts</h2>
+            {[['Space','Start / Pause first timer'],['R','Reset first timer'],['N','Toggle ambient noise'],['1','Timer tab'],['2','Sounds tab'],['3','Notes tab'],['4','Stopwatch tab'],['5','Stats tab']].map(([k,d])=>(
+              <div key={k} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 0', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+                <kbd style={{ background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.2)', padding:'3px 10px', borderRadius:6, fontSize:12, fontWeight:800, fontFamily:'monospace' }}>{k}</kbd>
+                <span style={{ fontSize:13, color:'rgba(255,255,255,0.7)' }}>{d}</span>
               </div>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
-                  Short Break: {globalBreakMin} min
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="30"
-                  value={globalBreakMin}
-                  onChange={(e) => setGlobalBreakMin(parseInt(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
-                  Long Break: {globalLongBreakMin} min
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="60"
-                  value={globalLongBreakMin}
-                  onChange={(e) => setGlobalLongBreakMin(parseInt(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
-                  Long Break Interval: every {longBreakInterval} pomodoros
-                </label>
-                <input
-                  type="range"
-                  min="2"
-                  max="8"
-                  value={longBreakInterval}
-                  onChange={(e) => setLongBreakInterval(parseInt(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-            </div>
-            
-            {/* Sound Settings */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
-                Sound Settings
-              </h3>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={soundEnabled}
-                    onChange={(e) => setSoundEnabled(e.target.checked)}
-                  />
-                  Alarm Sound
-                </label>
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
-                  Alarm Volume: {Math.round(alarmVolume * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value={alarmVolume}
-                  onChange={(e) => setAlarmVolume(parseFloat(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
-                  Ambient Noise Volume: {Math.round(volume * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={volume}
-                  onChange={e => setVolume(parseFloat(e.target.value))}
-                  style={{ width: '100%' }}
-                />
-              </div>
-            </div>
-            
-            {/* Notification Settings */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
-                Notification Settings
-              </h3>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={notificationsEnabled}
-                    onChange={(e) => setNotificationsEnabled(e.target.checked)}
-                  />
-                  Browser Notifications
-                </label>
-              </div>
-            </div>
-            
-            {/* Daily Goal */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
-                Daily Goal
-              </h3>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {[1, 2, 4, 6, 8].map(hours => (
-                  <button
-                    key={hours}
-                    onClick={() => setDailyGoal(hours)}
-                    style={{
-                      background: dailyGoal === hours ? accentBlue : 'transparent',
-                      border: `1px solid ${border}`,
-                      color: dailyGoal === hours ? 'white' : text,
-                      padding: '8px 12px',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {hours}h
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            {/* Auto Start */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ color: text, fontSize: '14px', fontWeight: '600', marginBottom: '16px' }}>
-                Auto Start
-              </h3>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={autoStartBreak}
-                    onChange={(e) => setAutoStartBreak(e.target.checked)}
-                  />
-                  Auto-start Break after Work
-                </label>
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ color: text, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={autoStartWork}
-                    onChange={(e) => setAutoStartWork(e.target.checked)}
-                  />
-                  Auto-start Work after Break
-                </label>
-              </div>
-            </div>
-            
-            <button
-              onClick={() => {
-                const newSettings = {
-                  workMin: globalWorkMin,
-                  breakMin: globalBreakMin,
-                  longBreakMin: globalLongBreakMin,
-                  longBreakInterval,
-                  soundEnabled,
-                  alarmVolume,
-                  notificationsEnabled,
-                  dailyGoal,
-                  autoStartBreak,
-                  autoStartWork
-                };
-                setSettings(newSettings);
-                setTimers(prev => prev.map(timer => ({
-                  ...timer,
-                  workMin: globalWorkMin,
-                  breakMin: globalBreakMin,
-                  longBreakMin: globalLongBreakMin,
-                  secsLeft: timer.phase === 'work' ? globalWorkMin * 60 : globalBreakMin * 60
-                })));
-                setShowSettings(false);
-              }}
-              style={{
-                width: '100%',
-                background: accentBlue,
-                border: 'none',
-                color: 'white',
-                padding: '12px',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '600'
-              }}
-            >
-              Save Settings
-            </button>
+            ))}
+            <button onClick={()=>setShowKeyHelp(false)}
+              style={{ marginTop:20, background:bgColor, border:'none', color:'#fff', padding:'11px 36px', borderRadius:10, fontSize:14, fontWeight:800 }}>Got it</button>
           </div>
         </div>
       )}
 
-      {/* Upgrade Modal */}
+      {/* ══ UPGRADE MODAL ════════════════════════════════════════════════════════ */}
       {showUpgrade && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)',
-          zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }} onClick={() => setShowUpgrade(false)}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
-            border: `1px solid ${border}`,
-            borderRadius: '24px',
-            padding: '40px',
-            width: '90%',
-            maxWidth: '420px',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚡</div>
-            <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '8px' }}>
-              Upgrade to Pro
-            </h2>
-            <p style={{ color: textDim, fontSize: '14px', marginBottom: '32px', lineHeight: '1.6' }}>
-              Unlock the full Pomodoros.io experience
-            </p>
-            <div style={{ marginBottom: '32px', textAlign: 'left' }}>
-              {[
-                '✅ Cloud sync across all devices',
-                '✅ Weekly leaderboard access',
-                '✅ Unlimited timer history',
-                '✅ Priority support',
-                '✅ Early access to new features',
-                '✅ Remove all limitations'
-              ].map(feature => (
-                <div key={feature} style={{
-                  color: accent, fontSize: '14px', padding: '8px 0',
-                  borderBottom: `1px solid ${border}` 
-                }}>{feature}</div>
-              ))}
-            </div>
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ color: accent, fontSize: '36px', fontWeight: '700' }}>$4.99</div>
-              <div style={{ color: textDim, fontSize: '13px' }}>per month · cancel anytime</div>
-            </div>
-            <button
-              onClick={() => {
-                window.open('https://buy.stripe.com/test_bJe00j01mcZk6JOeMH8k800', '_blank');
-              }}
-              style={{
-                width: '100%',
-                background: 'linear-gradient(135deg, #E07B4F, #ff6b35)',
-                border: 'none',
-                color: 'white',
-                padding: '16px',
-                borderRadius: '14px',
-                cursor: 'pointer',
-                fontSize: '16px',
-                fontWeight: '700',
-                marginBottom: '12px'
-              }}>
-              Start Pro — $4.99/month
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={()=>setShowUpgrade(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:22, padding:40, width:'90%', maxWidth:400, color:'#fff', textAlign:'center' }}>
+            <div style={{ fontSize:52, marginBottom:16 }}>⚡</div>
+            <h2 style={{ margin:'0 0 8px', fontSize:24, fontWeight:800 }}>Upgrade to Pro</h2>
+            <p style={{ color:'rgba(255,255,255,0.6)', marginBottom:24, fontSize:14, lineHeight:1.65 }}>Unlock cloud sync, leaderboard, and unlimited history</p>
+            {['☁️ Cloud sync across all devices','🏆 Weekly leaderboard','📊 Unlimited focus history','⚡ Priority support'].map(f=>(
+              <div key={f} style={{ fontSize:14, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', textAlign:'left', color:'rgba(255,255,255,0.8)' }}>{f}</div>
+            ))}
+            <div style={{ fontSize:34, fontWeight:800, margin:'22px 0 4px' }}>$4.99</div>
+            <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:22 }}>per month · cancel anytime</div>
+            <button onClick={()=>window.open('https://buy.stripe.com/test_bJe00j01mcZk6JOeMH8k800','_blank')}
+              style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:15, borderRadius:12, fontSize:16, fontWeight:800, marginBottom:10 }}>
+              Start Pro — $4.99/mo
             </button>
-            <button
-              onClick={() => setShowUpgrade(false)}
-              style={{
-                width: '100%',
-                background: 'transparent',
-                border: `1px solid ${border}`,
-                color: textDim,
-                padding: '12px',
-                borderRadius: '14px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}>
+            <button onClick={()=>setShowUpgrade(false)}
+              style={{ width:'100%', background:'transparent', border:'1px solid rgba(255,255,255,0.18)', color:'rgba(255,255,255,0.55)', padding:12, borderRadius:12, fontSize:14 }}>
               Maybe later
             </button>
           </div>
         </div>
       )}
 
-      {/* Task Panel */}
-      {showTaskPanel && (
-        <div style={{
-          position: 'fixed',
-          top: isMobile ? '58px' : '60px',
-          left: 0,
-          bottom: 0,
-          width: '320px',
-          background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
-          border: `1px solid ${border}`,
-          borderLeft: 'none',
-          backdropFilter: 'blur(20px)',
-          zIndex: 999,
-          padding: '24px',
-          overflowY: 'auto',
-          transform: showTaskPanel ? 'translateX(0)' : 'translateX(-100%)',
-          transition: 'transform 0.3s ease'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 style={{ color: accent, fontSize: '18px', fontWeight: '600', margin: 0 }}>
-              📋 Tasks
-            </h2>
-            <button onClick={() => setShowTaskPanel(false)} style={{
-              background: 'transparent', border: 'none', color: textDim,
-              fontSize: '20px', cursor: 'pointer'
-            }}>×</button>
-          </div>
-          
-          {/* Add new task */}
-          <div style={{ marginBottom: '20px' }}>
-            <input
-              type="text"
-              placeholder="Add new task..."
-              value={newTaskInput}
-              onChange={(e) => setNewTaskInput(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter' && newTaskInput.trim()) {
-                  const newTask = {
-                    id: Date.now(),
-                    name: newTaskInput.trim(),
-                    estimatedPomodoros: 1,
-                    completedPomodoros: 0,
-                    done: false,
-                    createdAt: new Date().toISOString()
-                  };
-                  setTasks([...tasks, newTask]);
-                  setNewTaskInput('');
-                }
-              }}
-              style={{
-                width: '100%',
-                background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                border: `1px solid ${border}`,
-                color: text,
-                padding: '12px',
-                borderRadius: '8px',
-                fontSize: '14px',
-                outline: 'none',
-                marginBottom: '8px'
-              }}
-            />
-            <select
-              value={1}
-              onChange={(e) => {
-                if (newTaskInput.trim()) {
-                  const newTask = {
-                    id: Date.now(),
-                    name: newTaskInput.trim(),
-                    estimatedPomodoros: parseInt(e.target.value),
-                    completedPomodoros: 0,
-                    done: false,
-                    createdAt: new Date().toISOString()
-                  };
-                  setTasks([...tasks, newTask]);
-                  setNewTaskInput('');
-                }
-              }}
-              style={{
-                width: '100%',
-                background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                border: `1px solid ${border}`,
-                color: text,
-                padding: '8px',
-                borderRadius: '8px',
-                fontSize: '14px',
-                outline: 'none'
-              }}
-            >
-              {[...Array(10)].map((_, i) => (
-                <option key={i + 1} value={i + 1}>{i + 1} pomodoro{i + 1 > 1 ? 's' : ''}</option>
+      {/* ══ ONBOARDING ═══════════════════════════════════════════════════════════ */}
+      {showOnboard && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.88)', backdropFilter:'blur(12px)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:22, padding:40, width:'90%', maxWidth:440, color:'#fff', textAlign:'center' }}>
+            {onboardStep===1&&(<>
+              <div style={{ fontSize:64, marginBottom:20 }}>🍅</div>
+              <h2 style={{ fontSize:22, fontWeight:800, marginBottom:12 }}>Welcome to Pomodoros.io</h2>
+              <p style={{ color:'rgba(255,255,255,0.65)', fontSize:14, lineHeight:1.7 }}>The only Pomodoro timer with up to <strong>4 simultaneous timers</strong>, Supabase leaderboard, AI insights, stopwatch, ambient noise and more. All free.</p>
+            </>)}
+            {onboardStep===2&&(<>
+              <div style={{ fontSize:64, marginBottom:20 }}>🎯</div>
+              <h2 style={{ fontSize:22, fontWeight:800, marginBottom:16 }}>How it works</h2>
+              {['Add your tasks below the timer','Hit START for a 25-min focus session','Take a break when the alarm rings','After 4 cycles, earn a long break','Sign in to join the global leaderboard'].map((s,i)=>(
+                <div key={i} style={{ fontSize:13, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', textAlign:'left', color:'rgba(255,255,255,0.75)' }}>{i+1}. {s}</div>
               ))}
-            </select>
-          </div>
-          
-          {/* Task list */}
-          <div style={{ marginBottom: '20px' }}>
-            {tasks.filter(t => !t.done).map(task => (
-              <div key={task.id} style={{
-                background: themeMode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
-                border: `1px solid ${border}`,
-                borderRadius: '8px',
-                padding: '12px',
-                marginBottom: '8px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={task.done}
-                    onChange={(e) => {
-                      setTasks(tasks.map(t => 
-                        t.id === task.id ? { ...t, done: e.target.checked } : t
-                      ));
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  <span style={{ 
-                    color: text, 
-                    fontSize: '14px', 
-                    textDecoration: task.done ? 'line-through' : 'none',
-                    opacity: task.done ? 0.5 : 1
-                  }}>
-                    {task.name}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
-                  {[...Array(task.estimatedPomodoros)].map((_, i) => (
-                    <div key={i} style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      background: i < task.completedPomodoros ? accentBlue : border
-                    }} />
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => {
-                      const template = { ...task, id: Date.now() };
-                      setTemplates([...templates, template]);
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: `1px solid ${border}`,
-                      color: textDim,
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '10px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Save as Template
-                  </button>
-                  <button
-                    onClick={() => setTasks(tasks.filter(t => t.id !== task.id))}
-                    style={{
-                      background: 'transparent',
-                      border: `1px solid ${border}`,
-                      color: textDim,
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '10px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          {/* Templates */}
-          {templates.length > 0 && (
-            <div>
-              <h3 style={{ color: textDim, fontSize: '12px', fontWeight: '500', marginBottom: '8px' }}>
-                Templates
-              </h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                {templates.map(template => (
-                  <button
-                    key={template.id}
-                    onClick={() => {
-                      const newTask = {
-                        id: Date.now(),
-                        name: template.name,
-                        estimatedPomodoros: template.estimatedPomodoros,
-                        completedPomodoros: 0,
-                        done: false,
-                        createdAt: new Date().toISOString()
-                      };
-                      setTasks([...tasks, newTask]);
-                    }}
-                    style={{
-                      background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                      border: `1px solid ${border}`,
-                      color: text,
-                      padding: '4px 8px',
-                      borderRadius: '12px',
-                      fontSize: '10px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {template.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          {/* Estimated finish time */}
-          {tasks.filter(t => !t.done).length > 0 && (
-            <div style={{
-              marginTop: '20px',
-              padding: '12px',
-              background: themeMode === 'dark' ? 'rgba(224,123,79,0.1)' : 'rgba(224,123,79,0.05)',
-              border: `1px solid ${border}`,
-              borderRadius: '8px',
-              textAlign: 'center'
-            }}>
-              <div style={{ color: textDim, fontSize: '10px', marginBottom: '4px' }}>
-                Estimated finish time
-              </div>
-              <div style={{ color: accent, fontSize: '14px', fontWeight: '600' }}>
-                {Math.ceil(tasks.filter(t => !t.done).reduce((sum, t) => 
-                  sum + (t.estimatedPomodoros - t.completedPomodoros), 0
-                ) * (globalWorkMin || 25) / 60)} hours
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Keyboard Help Modal */}
-      {showKeyboardHelp && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
-          zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }} onClick={() => setShowKeyboardHelp(false)}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
-            border: `1px solid ${border}`,
-            borderRadius: '20px',
-            padding: '32px',
-            width: '90%',
-            maxWidth: '420px',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⌨️</div>
-            <h2 style={{ color: accent, fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>
-              Keyboard Shortcuts
-            </h2>
-            <p style={{ color: textDim, fontSize: '14px', marginBottom: '24px', lineHeight: '1.6' }}>
-              Work faster with these shortcuts
-            </p>
-            <div style={{ marginBottom: '24px', textAlign: 'left' }}>
-              {[
-                { key: 'Space', desc: 'Start/Pause first timer' },
-                { key: 'R', desc: 'Reset first timer' },
-                { key: 'N', desc: 'Toggle noise' },
-                { key: '1', desc: 'Switch to Timer tab' },
-                { key: '2', desc: 'Switch to Noise tab' },
-                { key: '3', desc: 'Switch to Notes tab' },
-                { key: '4', desc: 'Switch to Stopwatch tab' },
-                { key: '5', desc: 'Switch to Stats tab' }
-              ].map(shortcut => (
-                <div key={shortcut.key} style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '8px 0',
-                  borderBottom: `1px solid ${border}`
-                }}>
-                  <div style={{
-                    background: themeMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                    border: `1px solid ${border}`,
-                    borderRadius: '6px',
-                    padding: '4px 8px',
-                    fontSize: '12px',
-                    fontWeight: '600',
-                    color: accent,
-                    minWidth: '40px',
-                    textAlign: 'center'
-                  }}>
-                    {shortcut.key}
-                  </div>
-                  <div style={{
-                    color: text,
-                    fontSize: '14px'
-                  }}>
-                    {shortcut.desc}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowKeyboardHelp(false)}
-              style={{
-                width: '100%',
-                background: accentBlue,
-                border: 'none',
-                color: 'white',
-                padding: '12px',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '600'
-              }}>
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Onboarding Modal */}
-      {showOnboarding && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)',
-          zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }}>
-          <div style={{
-            background: themeMode === 'dark' ? '#111118' : '#E8E4DC',
-            border: `1px solid ${border}`,
-            borderRadius: '24px',
-            padding: '40px',
-            width: '90%',
-            maxWidth: '480px',
-            textAlign: 'center'
-          }}>
-            {onboardingStep === 1 && (
-              <>
-                <div style={{ fontSize: '64px', marginBottom: '24px' }}>🍅</div>
-                <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '16px' }}>
-                  Welcome to Pomodoros.io
-                </h2>
-                <p style={{ color: text, fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
-                  The ultimate focus timer with deep work features
-                </p>
-                <div style={{ marginBottom: '32px', textAlign: 'left' }}>
-                  {[
-                    '🔥 Run up to 4 timers simultaneously',
-                    '⏱️ Built-in stopwatch for time tracking',
-                    '🌧️ Ambient noise for deep focus',
-                    '📊 Detailed stats and progress tracking'
-                  ].map(feature => (
-                    <div key={feature} style={{
-                      color: text, fontSize: '14px', padding: '8px 0',
-                      display: 'flex', alignItems: 'center', gap: '8px'
-                    }}>
-                      {feature}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            
-            {onboardingStep === 2 && (
-              <>
-                <div style={{ fontSize: '64px', marginBottom: '24px' }}>🎯</div>
-                <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '16px' }}>
-                  How to Use
-                </h2>
-                <p style={{ color: text, fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
-                  Get started in 3 simple steps
-                </p>
-                <div style={{ marginBottom: '32px', textAlign: 'left' }}>
-                  {[
-                    '1️⃣ Add a timer and set your work duration',
-                    '2️⃣ Press Start to begin your focus session',
-                    '3️⃣ Take breaks when the timer completes'
-                  ].map(step => (
-                    <div key={step} style={{
-                      color: text, fontSize: '14px', padding: '8px 0',
-                      display: 'flex', alignItems: 'center', gap: '8px'
-                    }}>
-                      {step}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            
-            {onboardingStep === 3 && (
-              <>
-                <div style={{ fontSize: '64px', marginBottom: '24px' }}>🚀</div>
-                <h2 style={{ color: accent, fontSize: '24px', fontWeight: '700', marginBottom: '16px' }}>
-                  Save Your Progress
-                </h2>
-                <p style={{ color: text, fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
-                  Sign in to sync your data across devices
-                </p>
-                <div style={{ marginBottom: '32px', textAlign: 'left' }}>
-                  {[
-                    '💾 Save your stats and progress',
-                    '🏆 Access the global leaderboard',
-                    '☁️ Sync across all your devices',
-                    '⭐ Unlock premium features'
-                  ].map(benefit => (
-                    <div key={benefit} style={{
-                      color: text, fontSize: '14px', padding: '8px 0',
-                      display: 'flex', alignItems: 'center', gap: '8px'
-                    }}>
-                      {benefit}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-              <button
-                onClick={() => {
-                  localStorage.setItem('pomodoros_visited', 'true');
-                  setShowOnboarding(false);
-                }}
-                style={{
-                  background: 'transparent',
-                  border: `1px solid ${border}`,
-                  color: textDim,
-                  padding: '12px 24px',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  fontSize: '14px'
-                }}
-              >
-                Skip
-              </button>
-              <button
-                onClick={() => {
-                  if (onboardingStep === 3) {
-                    localStorage.setItem('pomodoros_visited', 'true');
-                    setShowOnboarding(false);
-                  } else {
-                    setOnboardingStep(onboardingStep + 1);
-                  }
-                }}
-                style={{
-                  background: accentBlue,
-                  border: 'none',
-                  color: 'white',
-                  padding: '12px 24px',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '600'
-                }}
-              >
-                {onboardingStep === 3 ? 'Done' : 'Next'}
+            </>)}
+            {onboardStep===3&&(<>
+              <div style={{ fontSize:64, marginBottom:20 }}>🏆</div>
+              <h2 style={{ fontSize:22, fontWeight:800, marginBottom:12 }}>Compete globally</h2>
+              <p style={{ color:'rgba(255,255,255,0.65)', fontSize:14, lineHeight:1.7, marginBottom:20 }}>Sign in with Google to sync your focus stats and appear on the weekly leaderboard. See how you rank against focused workers worldwide.</p>
+              <button onClick={signIn} style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:13, borderRadius:10, fontSize:15, fontWeight:800, marginBottom:10 }}>Sign In with Google</button>
+            </>)}
+            <div style={{ display:'flex', gap:12, justifyContent:'center', marginTop:22 }}>
+              <button onClick={()=>{ls.set('pom_visited',true);setShowOnboard(false)}}
+                style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.55)', padding:'10px 22px', borderRadius:10, fontSize:13 }}>Skip</button>
+              <button onClick={()=>{ if(onboardStep>=3){ls.set('pom_visited',true);setShowOnboard(false);}else setOnboardStep(s=>s+1) }}
+                style={{ background:bgColor, border:'none', color:'#fff', padding:'10px 22px', borderRadius:10, fontSize:13, fontWeight:800 }}>
+                {onboardStep>=3?'Get Started':'Next →'}
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Toast Notification */}
-      {toast && (
-        <div style={{
-          position: 'fixed',
-          bottom: '24px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: themeMode === 'dark' ? '#1A1A24' : '#DEDAD2',
-          border: `1px solid ${border}`,
-          borderRadius: '100px',
-          padding: '12px 24px',
-          color: accent,
-          fontSize: '14px',
-          fontWeight: '500',
-          zIndex: 99999,
-          backdropFilter: 'blur(20px)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-          animation: 'fadeIn 0.3s ease',
-          whiteSpace: 'nowrap'
-        }}>
-          {toast}
         </div>
       )}
 
       {/* Footer */}
-      <div style={{
-        position: 'fixed',
-        bottom: '8px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        display: 'flex',
-        gap: '16px',
-        fontSize: '10px',
-        color: textDim,
-        opacity: 0.4,
-        zIndex: 1
-      }}>
-        {['Privacy', 'Terms', 'Contact'].map(link => (
-          <span key={link} style={{ cursor: 'pointer' }}
-            onClick={() => window.open(`https://www.pomodoros.io/${link.toLowerCase()}`, '_blank')}>
-            {link}
-          </span>
-        ))}
+      {tab !== 'timer' && (
+        <div style={{ position:'fixed', bottom:6, left:'50%', transform:'translateX(-50%)', display:'flex', gap:16, fontSize:10, color:'rgba(255,255,255,0.2)', zIndex:1 }}>
+          {['Privacy','Terms','Contact'].map(l=>(
+            <span key={l} style={{ cursor:'pointer' }} onClick={()=>window.open(`https://www.pomodoros.io/${l.toLowerCase()}`,'_blank')}>{l}</span>
+          ))}
+        </div>
+      )}
       </div>
-          </div>
     </div>
-  );
+  )
 }
