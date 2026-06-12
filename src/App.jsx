@@ -27,9 +27,9 @@ function Ring({ secsLeft, total, color, glow, size, children }) {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const PHASE_COLORS = {
-  pomodoro:   '#BA4949',
-  shortBreak: '#38858A',
-  longBreak:  '#397097',
+  pomodoro:   '#4A1A1A',
+  shortBreak: '#0D1B2A',
+  longBreak:  '#0D1B2A',
 }
 
 const NOISE_OPTIONS = [
@@ -177,20 +177,17 @@ const updateHourlyFocus = (seconds, setHourlyFocusData) => {
 const generateInsights = (data) => {
   const entries = Object.entries(data || {})
 
-  if (!entries.length) return
+  if (!entries.length) return null
 
   const bestHour = entries.reduce((a, b) =>
     Number(a[1]) > Number(b[1]) ? a : b
   )
 
-  const insights = {
+  return {
     bestHour: bestHour[0],
     focusMinutes: Math.round(bestHour[1] / 60),
     generatedAt: new Date().toISOString()
   }
-
-  setWeeklyInsights(insights)
-  ls.set('pom_weekly_insights', insights)
 }
 
 const getPlayerTitle = level => {
@@ -203,7 +200,7 @@ const getPlayerTitle = level => {
   return 'Focus Beginner'
 }
 
-const generateCoachMessage = (totalFocusSecs, totalCycles, streak, focusScore, distractions, setCoachMessages) => {
+const generateCoachMessage = (totalFocusSecs, totalCycles, streak, focusScore, distractions) => {
   const messages = []
 
   if (totalFocusSecs < 3600) {
@@ -242,12 +239,10 @@ const generateCoachMessage = (totalFocusSecs, totalCycles, streak, focusScore, d
     )
   }
 
-  setCoachMessages(messages)
-
-  ls.set('pom_coach_messages', messages)
+  return messages
 }
 
-const checkBadges = (totalCycles, streak, focusScore, setBadges) => {
+const checkBadges = (totalCycles, streak, focusScore) => {
   const earned = []
 
   if (totalCycles >= 10)
@@ -268,16 +263,10 @@ const checkBadges = (totalCycles, streak, focusScore, setBadges) => {
   if (focusScore >= 95)
     earned.push('🎯 Laser Focus')
 
-  setBadges(prev => {
-    const merged = [...new Set([...prev, ...earned])]
-
-    ls.set('pom_badges', merged)
-
-    return merged
-  })
+  return earned
 }
 
-const buildDailyReview = (totalFocusSecs, totalCycles, focusScore, streak, setDailyReview) => {
+const buildDailyReview = (totalFocusSecs, totalCycles, focusScore, streak) => {
   const review = {
     focusHours: (
       totalFocusSecs / 3600
@@ -295,9 +284,7 @@ const buildDailyReview = (totalFocusSecs, totalCycles, focusScore, streak, setDa
         : 'Maintain your current momentum.'
   }
 
-  setDailyReview(review)
-
-  ls.set('pom_daily_review', review)
+  return review
 }
 
 const ls = {
@@ -382,6 +369,8 @@ export default function App() {
     mode: 'pomodoro',
     secsLeft: settings.pomodoroMin * 60,
     totalSecs: settings.pomodoroMin * 60,
+    workMin: settings.pomodoroMin,
+    breakMin: settings.shortBreakMin,
     running: false,
     cyclesDone: 0,
     totalFocusSecs: 0,
@@ -439,15 +428,18 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState(null)
 
   // ── THEME: background changes with timerMode ──
-  const bgColor = PHASE_COLORS[timerMode] || PHASE_COLORS.pomodoro
-  const accentColor = bgColor
-  const meshOpacity = 1
-  const isDark = false
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('pom_theme_dark')
+    return saved !== null ? JSON.parse(saved) : false
+  })
+  const bgColor = isDark ? '#0a0a0a' : (PHASE_COLORS[timerMode] || PHASE_COLORS.pomodoro)
+  const accentColor = isDark ? '#1a1a1a' : bgColor
+  const meshOpacity = isDark ? 0 : 1
   const textMain = '#fff'
-  const textDim = 'rgba(255,255,255,0.7)'
-  const textFaint = 'rgba(255,255,255,0.4)'
-  const surfBg = 'rgba(0,0,0,0.18)'
-  const borderCol = 'rgba(255,255,255,0.12)'
+  const textDim = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.7)'
+  const textFaint = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.4)'
+  const surfBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.18)'
+  const borderCol = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.12)'
 
   // ─── DERIVED ─────────────────────────────────────────────────────────────────
   const totalFocusSecs = (timers || []).reduce((s, t) => s + (t.totalFocusSecs || 0), 0)
@@ -629,11 +621,21 @@ export default function App() {
     if (timers.length >= 4) { showToast('Maximum 4 timers'); return }
     const id  = Date.now()
     const num = timers.length + 1
+    const grid = document.querySelector('.timer-grid')
+    if (grid) {
+      grid.style.transition = 'grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1)'
+      setTimeout(() => { if (grid) grid.style.transition = '' }, 500)
+    }
     setTimers(prev => [...prev, makeTimer(id, num)])
   }
 
   const removeTimer = (id) => {
     clearTimerInterval(id)
+    const grid = document.querySelector('.timer-grid')
+    if (grid) {
+      grid.style.transition = 'grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1)'
+      setTimeout(() => { if (grid) grid.style.transition = '' }, 500)
+    }
     setTimers(prev => (prev || []).filter(t => t.id !== id))
   }
 
@@ -665,11 +667,11 @@ export default function App() {
         } else {
           nextMode = 'pomodoro'
         }
+        const timerWorkMin = t.workMin || settings.pomodoroMin
+        const timerBreakMin = t.breakMin || settings.shortBreakMin
         const nextSecs = nextMode === 'pomodoro'
-          ? settings.pomodoroMin * 60
-          : nextMode === 'shortBreak'
-          ? settings.shortBreakMin * 60
-          : settings.longBreakMin * 60
+          ? timerWorkMin * 60
+          : timerBreakMin * 60
         const upd = {
           ...t,
           running: false,
@@ -693,10 +695,10 @@ export default function App() {
     clearTimerInterval(id)
     setTimers(prev => (prev || []).map(t => {
       if (t.id !== id) return t
-      const secs = t.mode === 'pomodoro' ? settings.pomodoroMin * 60
-        : t.mode === 'shortBreak' ? settings.shortBreakMin * 60
-        : settings.longBreakMin * 60
-      return { ...t, running: false, secsLeft: secs }
+      const workMin = t.workMin || settings.pomodoroMin
+      const breakMin = t.breakMin || settings.shortBreakMin
+      const secs = t.mode === 'pomodoro' ? workMin * 60 : breakMin * 60
+      return { ...t, running: false, secsLeft: secs, totalSecs: secs }
     }))
   }, [settings])
 
@@ -710,10 +712,13 @@ export default function App() {
 
   const changeTimerPhase = useCallback((id, mode) => {
     clearTimerInterval(id)
-    const secs = mode === 'pomodoro' ? settings.pomodoroMin * 60
-      : mode === 'shortBreak' ? settings.shortBreakMin * 60
-      : settings.longBreakMin * 60
-    setTimers(prev => (prev || []).map(t => t.id === id ? { ...t, running: false, mode, secsLeft: secs, totalSecs: secs } : t))
+    setTimers(prev => (prev || []).map(t => {
+      if (t.id !== id) return t
+      const workMin = t.workMin || settings.pomodoroMin
+      const breakMin = t.breakMin || settings.shortBreakMin
+      const secs = mode === 'pomodoro' ? workMin * 60 : breakMin * 60
+      return { ...t, running: false, mode, secsLeft: secs, totalSecs: secs }
+    }))
   }, [settings])
 
   const updateTimerField = useCallback((id, field, val) => {
@@ -752,7 +757,7 @@ export default function App() {
         swRefs.current[id] = setInterval(() => {
           setStopwatches(p => (p || []).map(s => s.id === id
             ? { ...s, elapsed: Math.floor((Date.now() - start) / 1000) } : s))
-        }, 200)
+        }, 1000)
         return (prev || []).map(s => s.id === id ? { ...s, running: true } : s)
       }
     })
@@ -804,6 +809,9 @@ export default function App() {
   useEffect(() => { ls.set('pom_templates', templates) }, [templates])
   useEffect(() => { ls.set('pom_settings', settings) }, [settings])
   useEffect(() => { ls.set('pom_note', note) }, [note])
+  useEffect(() => {
+    localStorage.setItem('pom_theme_dark', JSON.stringify(isDark))
+  }, [isDark])
 
   // ─── FOCUS SCORE ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -840,29 +848,38 @@ export default function App() {
 
   // ─── INSIGHTS ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    generateInsights(hourlyFocusData)
+    const insights = generateInsights(hourlyFocusData)
+    if (insights) {
+      setWeeklyInsights(insights)
+      ls.set('pom_weekly_insights', insights)
+    }
   }, [hourlyFocusData])
 
   // ─── COACH UPDATES ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    generateCoachMessage(totalFocusSecs, totalCycles, streak, focusScore, distractions, setCoachMessages)
+    const messages = generateCoachMessage(totalFocusSecs, totalCycles, streak, focusScore, distractions)
+    setCoachMessages(messages)
+    ls.set('pom_coach_messages', messages)
   }, [
     totalFocusSecs,
     totalCycles,
     focusScore,
     streak,
-    distractions,
-    setCoachMessages
+    distractions
   ])
 
   // ─── BADGE CHECKS ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    checkBadges(totalCycles, streak, focusScore, setBadges)
+    const earned = checkBadges(totalCycles, streak, focusScore)
+    setBadges(prev => {
+      const merged = [...new Set([...prev, ...earned])]
+      ls.set('pom_badges', merged)
+      return merged
+    })
   }, [
     totalCycles,
     streak,
-    focusScore,
-    setBadges
+    focusScore
   ])
 
   // ─── RPG LEVEL SYSTEM ─────────────────────────────────────────────────────────
@@ -876,13 +893,14 @@ export default function App() {
 
   // ─── DAILY REVIEW ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    buildDailyReview(totalFocusSecs, totalCycles, focusScore, streak, setDailyReview)
+    const review = buildDailyReview(totalFocusSecs, totalCycles, focusScore, streak)
+    setDailyReview(review)
+    ls.set('pom_daily_review', review)
   }, [
     totalFocusSecs,
     totalCycles,
     focusScore,
-    streak,
-    setDailyReview
+    streak
   ])
 
   // ─── DYNAMIC TITLE ───────────────────────────────────────────────────────────
@@ -986,8 +1004,8 @@ export default function App() {
       .task-row:hover { border-color: rgba(255,255,255,0.12) !important; background: rgba(255,255,255,0.05) !important; }
       .icon-btn:hover { background: rgba(255,255,255,0.12) !important; transform: translateY(-2px); }
       .adj-btn:hover { background: rgba(255,255,255,0.1) !important; border-color: rgba(255,255,255,0.3) !important; }
-      .timer-grid { transition: all 0.45s cubic-bezier(0.23,1,0.32,1) !important; }
-      .sw-grid    { transition: all 0.45s cubic-bezier(0.23,1,0.32,1) !important; }
+      .timer-grid { transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1) !important; }
+            .sw-grid    { transition: all 0.45s cubic-bezier(0.23,1,0.32,1) !important; }
       .preset-btn:hover { border-color: #10b981 !important; color: #10b981 !important; background: rgba(16,185,129,0.08) !important; }
       .work-btn:hover  { box-shadow: 0 0 20px rgba(16,185,129,0.3) !important; }
       .break-btn:hover { box-shadow: 0 0 20px rgba(59,130,246,0.3) !important; }
@@ -996,6 +1014,7 @@ export default function App() {
       html, body { overflow: hidden !important; height: 100% !important; }
       #root { height: 100% !important; overflow: hidden !important; }
       .timer-grid > div { background: transparent !important; border: none !important; box-shadow: none !important; }
+      .timer-card-wrap { transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important; opacity: 1 !important; }
       @media(max-width:767px){.timer-grid{grid-template-columns:1fr!important}.sw-grid{grid-template-columns:1fr!important}}
     `
     document.head.appendChild(s)
@@ -1007,9 +1026,9 @@ export default function App() {
   const TimerCard = ({ timer, count }) => {
     const isLarge  = count === 1
     const isMed    = count === 2
-    const digitPx  = isMobile ? 80 : isLarge ? 120 : isMed ? 78 : 56
-    const padV     = isLarge ? 32 : isMed ? 22 : 14
-    const padH     = isLarge ? 40 : isMed ? 28 : 18
+    const digitPx  = isMobile ? 76 : isLarge ? 116 : isMed ? 92 : 70
+    const padV     = isLarge ? 28 : isMed ? 20 : 14
+    const padH     = isLarge ? 28 : isMed ? 22 : 16
 
     const modeColor = {
       pomodoro:   '#BA4949',
@@ -1018,18 +1037,20 @@ export default function App() {
     }[timer.mode]
 
     return (
-      <div style={{
-        background: 'rgba(0,0,0,0.2)',
-        border: '1px solid rgba(255,255,255,0.18)',
-        borderTop: `3px solid rgba(255,255,255,0.6)`,
-        borderRadius: 12,
-        padding: `${padV}px ${padH}px`,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 0,
-        position: 'relative',
-      }}>
+      <div className="timer-card-wrap" style={{
+    background: 'rgba(0,0,0,0.22)',
+    border: '1px solid rgba(255,255,255,0.15)',
+    borderTop: '3px solid rgba(255,255,255,0.55)',
+    borderRadius: 12,
+    padding: `${padV}px ${padH}px`,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 0,
+    position: 'relative',
+    width: '100%',
+    boxSizing: 'border-box',
+  }}>
         {/* Delete button */}
         {count > 1 && (
           <button onClick={() => removeTimer(timer.id)}
@@ -1045,82 +1066,215 @@ export default function App() {
           <input
             value={editName}
             onChange={e => setEditName(e.target.value)}
-            onBlur={() => { if (editName.trim()) updateTimerField(timer.id, 'name', editName.trim()); setEditingId(null) }}
-            onKeyDown={e => { if (e.key==='Enter'||e.key==='Escape'){if(editName.trim())updateTimerField(timer.id,'name',editName.trim());setEditingId(null)} }}
+            onBlur={() => {
+    const trimmed = (editName || editingName || '').trim()
+    if (trimmed) {
+      updateTimerField(timer.id, 'name', trimmed)
+      updateTimerField(timer.id, 'task', trimmed)
+      setTasks(prev => {
+        const exists = prev.find(t => t.timerRef === timer.id)
+        if (exists) {
+          return prev.map(t => t.timerRef === timer.id ? { ...t, name: trimmed } : t)
+        }
+        return [...prev, { id: Date.now(), name: trimmed, estimatedPomodoros: 1, completedPomodoros: 0, done: false, timerRef: timer.id }]
+      })
+    }
+    setEditingId(null)
+  }}
+            onKeyDown={e => {
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      const trimmed = (editName || editingName || '').trim()
+      if (trimmed) {
+        updateTimerField(timer.id, 'name', trimmed)
+        updateTimerField(timer.id, 'task', trimmed)
+        setTasks(prev => {
+          const exists = prev.find(t => t.timerRef === timer.id)
+          if (exists) {
+            return prev.map(t => t.timerRef === timer.id ? { ...t, name: trimmed } : t)
+          }
+          return [...prev, { id: Date.now(), name: trimmed, estimatedPomodoros: 1, completedPomodoros: 0, done: false, timerRef: timer.id }]
+        })
+      }
+      setEditingId(null)
+    }
+  }}
             autoFocus
             style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, textAlign:'center', marginBottom:8, letterSpacing:1, width:160 }}
           />
         ) : (
           <div
             onClick={() => { setEditingId(timer.id); setEditName(timer.name) }}
-            style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.75)', letterSpacing:1.5, textTransform:'uppercase', cursor:'pointer', marginBottom:6, padding:'3px 10px', borderRadius:5 }}
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'rgba(255,255,255,0.75)',
+              letterSpacing: 1.5,
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+              marginBottom: 8,
+              padding: '4px 14px',
+              borderRadius: 20,
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              textAlign: 'center',
+              maxWidth: 180,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
             onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.12)'}
-            onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+            onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.08)'}>
             {timer.name}
           </div>
         )}
 
         {/* Task line */}
-        <input
-          value={timer.task}
-          onChange={e => updateTimerField(timer.id, 'task', e.target.value)}
-          placeholder="What are you working on?"
-          style={{ background:'transparent', border:'none', borderBottom:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.7)', fontSize:12, textAlign:'center', width:'85%', padding:'2px 6px', marginBottom:10, caretColor:'#fff' }}
-        />
-
+        
         {/* Mode tabs — per timer */}
-        <div style={{ display:'flex', gap:3, marginBottom:12 }}>
-          {[{k:'pomodoro',l:'Pomodoro'},{k:'shortBreak',l:'Short Break'},{k:'longBreak',l:'Long Break'}].map(({k,l}) => (
-            <button key={k}
-              onClick={() => changeTimerPhase(timer.id, k)}
-              style={{ background: timer.mode===k?'rgba(0,0,0,0.35)':'transparent', border:`1px solid ${timer.mode===k?'rgba(255,255,255,0.45)':'rgba(255,255,255,0.18)'}`, color: timer.mode===k?'#fff':'rgba(255,255,255,0.5)', padding:'4px 10px', borderRadius:20, fontSize:10, fontWeight:700, letterSpacing:.5 }}>
-              {l}
-            </button>
-          ))}
+        <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+          <button
+            onClick={() => { changeTimerPhase(timer.id, 'pomodoro'); setTimerMode('pomodoro') }}
+            style={{
+              padding: '6px 20px',
+              borderRadius: 100,
+              border: 'none',
+              background: timer.mode === 'pomodoro'
+                ? (isDark ? '#6B2020' : 'rgba(255,255,255,0.25)')
+                : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.08)'),
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              boxShadow: timer.mode === 'pomodoro' && isDark ? '0 0 14px rgba(107,32,32,0.6)' : 'none',
+            }}>
+            Work
+          </button>
+          <button
+            onClick={() => { changeTimerPhase(timer.id, 'shortBreak'); setTimerMode('shortBreak') }}
+            style={{
+              padding: '6px 20px',
+              borderRadius: 100,
+              border: 'none',
+              background: timer.mode !== 'pomodoro'
+                ? (isDark ? '#0D2B4A' : 'rgba(255,255,255,0.25)')
+                : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.08)'),
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              boxShadow: timer.mode !== 'pomodoro' && isDark ? '0 0 14px rgba(13,43,74,0.7)' : 'none',
+            }}>
+            Break
+          </button>
         </div>
 
+        
         {/* Countdown */}
-        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:14 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:20, marginTop:16, width:'100%', justifyContent:'center', paddingRight:8 }}>
           <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.max(60,timer.secsLeft-60))}
-            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:30, height:30, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center' }}
+            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:34, height:34, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}
             disabled={timer.running}>−</button>
 
           <div style={{ textAlign:'center' }}>
-            <div style={{ fontSize:digitPx, fontWeight:700, color:'#fff', letterSpacing:-4, lineHeight:1, userSelect:'none', fontVariantNumeric:'tabular-nums', animation: timer.running?'none':'none' }}>
+            <div style={{ fontSize:digitPx, fontWeight:700, color:'#fff', letterSpacing:-2, lineHeight:1, userSelect:'none', fontVariantNumeric:'tabular-nums', animation: timer.running?'none':'none' }}>
               {fmtTime(timer.secsLeft)}
             </div>
           </div>
 
           <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.min(3600,timer.secsLeft+60))}
-            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:30, height:30, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center' }}
+            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:34, height:34, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}
             disabled={timer.running}>+</button>
         </div>
 
-        {/* START / PAUSE */}
-        <button
-          onClick={() => toggleTimer(timer.id)}
-          style={{ background:'#fff', color: bgColor, border:'none', padding: isLarge?'16px 64px':isMed?'13px 44px':'10px 28px', borderRadius:4, fontSize: isLarge?18:isMed?15:13, fontWeight:900, letterSpacing:2, marginBottom:10, minWidth: isLarge?180:120 }}
-          onMouseEnter={e => e.currentTarget.style.opacity='0.88'}
-          onMouseLeave={e => e.currentTarget.style.opacity='1'}>
-          {timer.running ? 'PAUSE' : 'START'}
-        </button>
+        <div style={{
+    display: 'flex',
+    gap: 8,
+    justifyContent: 'center',
+    marginBottom: 6,
+    width: '100%',
+  }}>
+    <button
+      onClick={() => toggleTimer(timer.id)}
+      style={{
+        width: isLarge ? 140 : isMed ? 110 : 88,
+        background: '#fff',
+        color: bgColor,
+        border: 'none',
+        padding: isLarge ? '12px 0' : isMed ? '10px 0' : '8px 0',
+        borderRadius: 6,
+        fontSize: isLarge ? 14 : isMed ? 12 : 11,
+        fontWeight: 900,
+        letterSpacing: 2,
+        cursor: 'pointer',
+        transition: 'opacity 0.15s ease',
+        flexShrink: 0,
+      }}
+      onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+      onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+      {timer.running ? 'PAUSE' : 'START'}
+    </button>
+    <button
+      onClick={() => resetTimer(timer.id)}
+      style={{
+        width: isLarge ? 140 : isMed ? 110 : 88,
+        background: surfBg,
+        color: '#fff',
+        border: `1px solid ${borderCol}`,
+        padding: isLarge ? '12px 0' : isMed ? '10px 0' : '8px 0',
+        borderRadius: 6,
+        fontSize: isLarge ? 14 : isMed ? 12 : 11,
+        fontWeight: 700,
+        letterSpacing: 1,
+        cursor: 'pointer',
+        transition: 'all 0.15s ease',
+        flexShrink: 0,
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)' }}>
+      ↺ RESET
+    </button>
+  </div>
 
-        {/* Reset */}
-        <button
-          onClick={() => resetTimer(timer.id)}
-          style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.55)', fontSize:12, padding:'3px 10px' }}
-          onMouseEnter={e => e.currentTarget.style.color='#fff'}
-          onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.55)'}>
-          ↺ Reset
-        </button>
+        {/* Preset pills */}
+        <div style={{ display:'flex', gap:6, marginTop:6, marginBottom:0 }}>
+          {[{label:'25/5',work:25,brk:5},{label:'30/10',work:30,brk:10},{label:'45/15',work:45,brk:15}].map(p => {
+            const active = timer.mode === 'pomodoro'
+              ? Math.round((timer.totalSecs || timer.secsLeft) / 60) === p.work
+              : Math.round((timer.totalSecs || timer.secsLeft) / 60) === p.brk
+            return (
+              <button
+                key={p.label}
+                disabled={timer.running}
+                onClick={() => {
+                  const secs = timer.mode === 'pomodoro' ? p.work * 60 : p.brk * 60
+                  setTimers(prev => prev.map(t => t.id === timer.id ? {
+                    ...t,
+                    secsLeft: secs,
+                    totalSecs: secs,
+                    workMin: p.work,
+                    breakMin: p.brk,
+                  } : t))
+                }}
+                style={{
+                  padding: '3px 11px',
+                  borderRadius: 100,
+                  border: `1px solid ${active ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)'}`,
+                  background: active ? 'rgba(255,255,255,0.18)' : 'transparent',
+                  color: active ? '#fff' : 'rgba(255,255,255,0.5)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: timer.running ? 'not-allowed' : 'pointer',
+                  opacity: timer.running ? 0.35 : 1,
+                  transition: 'all 0.2s ease',
+                  letterSpacing: 0.3,
+                }}>
+                {p.label}
+              </button>
+            )
+          })}
+        </div>
 
-        {/* Cycle count */}
-        {count <= 2 && (
-          <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)', marginTop:6 }}>
-            #{timer.cyclesDone} · {fmtTime(timer.totalFocusSecs)} focused
-          </div>
-        )}
-      </div>
+              </div>
     )
   }
 
@@ -1244,7 +1398,7 @@ export default function App() {
         overflow: 'hidden',
       }}>
         {/* ══ HEADER ══════════════════════════════════════════════════════════════ */}
-        <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: isDark ? 'rgba(15,23,42,0.9)' : 'rgba(241,245,249,0.9)', backdropFilter: 'blur(20px)', borderBottom: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Logo */}
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <img src="/icon-192.png" alt="" style={{ height: 52, width: 'auto', objectFit: 'contain', borderRadius: 10 }}
@@ -1256,13 +1410,7 @@ export default function App() {
 
           {/* Right buttons */}
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            {installPrompt && (
-              <button onClick={async () => { installPrompt.prompt(); const {outcome} = await installPrompt.userChoice; if(outcome==='accepted') setInstallPrompt(null) }}
-                style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.3)', color:'#fff', padding:'6px 12px', borderRadius:6, fontSize:12, fontWeight:600 }}>
-                📲 Install
-              </button>
-            )}
-            <button
+                        <button
               onClick={() => setIsDark(d => !d)}
               title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               style={{
@@ -1295,21 +1443,25 @@ export default function App() {
                 {b.icon}
               </button>
             ))}
-            {isPro && <span style={{ background:'rgba(255,215,0,0.2)', border:'1px solid rgba(255,215,0,0.4)', color:'#FFD700', padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:800 }}>PRO ✨</span>}
-            {user ? (
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <img src={user.user_metadata?.avatar_url} alt="" style={{ width:32, height:32, borderRadius:'50%', border:'2px solid rgba(255,255,255,0.35)', cursor:'pointer' }}
-                  onClick={() => { setShowLeaderboard(true); loadLeaderboard() }} />
-                <button onClick={signOut} style={{ background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'5px 10px', borderRadius:6, fontSize:12 }}>Sign Out</button>
-              </div>
-            ) : (
-              <button onClick={signIn}
-                style={{ background: accentColor, border:'none', color:'#fff', padding:'8px 18px', borderRadius:20, fontSize:13, fontWeight:700 }}>
-                Sign In
-              </button>
-            )}
-          </div>
+                                  </div>
         </div>
+
+      {/* ══ MAINTENANCE BANNER ════════════════════════════════════════════════════════════ */}
+      <div style={{
+        width: '100%',
+        textAlign: 'center',
+        padding: '5px 16px',
+        background: 'rgba(0,0,0,0.15)',
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+        color: '#FF3B3B',
+        flexShrink: 0,
+      }}>
+        🚧 We are actively working on improving this site — sorry for any inconvenience caused 🚧
+      </div>
 
       {/* ══ NAV TABS ════════════════════════════════════════════════════════════ */}
       <div style={{ flexShrink: 0, padding: '8px 16px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto' }}>
@@ -1331,12 +1483,7 @@ export default function App() {
           </button>
         )}
 
-        {/* Leaderboard shortcut */}
-        <button onClick={()=>{setShowLeaderboard(true);loadLeaderboard()}}
-          style={{ background:isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:isDark ? '#94a3b8' : '#475569', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600 }}>
-          🏆 Leaderboard
-        </button>
-      </div>
+              </div>
 
       {/* ══ CONTENT ══════════════════════════════════════════════════════════════ */}
       <div style={{
@@ -1361,115 +1508,25 @@ export default function App() {
             <div className="timer-grid" style={{
               display: 'grid',
               gridTemplateColumns: timers.length === 1 ? '1fr' : '1fr 1fr',
-              gap: 12,
+              gridTemplateRows: timers.length >= 3 ? '1fr 1fr' : 'auto',
+              gap: 10,
               flex: 1,
-              overflow: 'hidden',
+              height: timers.length >= 3 ? '100%' : 'auto',
+              overflow: 'visible',
               width: '100%',
-              maxWidth: timers.length === 1 ? 420 : '100%',
+              maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 700 : '100%',
               margin: '0 auto',
-              alignItems: 'center',
-              justifyItems: 'center',
-              transition: 'all 0.45s cubic-bezier(0.23,1,0.32,1)',
+              alignItems: 'stretch',
+              alignContent: 'stretch',
+              transition: 'grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1)',
             }}>
               {(timers || []).map(t => <TimerCard key={t.id} timer={t} count={timers.length} />)}
             </div>
 
-            {/* Active task indicator */}
-            <div style={{ textAlign:'center', marginBottom:20 }}>
-              {activeTask ? (
-                <>
-                  <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', letterSpacing:1, marginBottom:3 }}>#{activeTask.completedPomodoros||0} Currently working on</div>
-                  <div style={{ fontSize:16, fontWeight:700 }}>{activeTask.name}</div>
-                </>
-              ) : (
-                <div style={{ fontSize:14, color:'rgba(255,255,255,0.55)' }}>Time to focus!</div>
-              )}
-            </div>
-
-            {/* ── TASKS ── */}
-            {timers.length < 3 ? (
-              <div style={{ maxWidth: timers.length===1?520:900, margin:'0 auto', flexShrink: 0 }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.08)', paddingBottom:10, marginBottom:12 }}>
-                <span style={{ fontSize:13, fontWeight:700, letterSpacing:1.5, color:textFaint, textTransform:'uppercase' }}>Tasks</span>
-                <span style={{ fontSize:12, color:textFaint }}>{pendingTasks.length} remaining{pendingTasks.length>0?` · ~${Math.ceil(pendingTasks.reduce((s,t)=>s+(t.estimatedPomodoros||1)-(t.completedPomodoros||0),0)*settings.pomodoroMin/60)}h`:''}</span>
-              </div>
-
-              {/* Task list */}
-              {tasks.map(task => (
-                <div key={task.id} className="task-row"
-                  onClick={() => setActiveTaskId(task.id===activeTaskId?null:task.id)}
-                  style={{ display:'flex', alignItems:'center', gap:10, background:activeTaskId===task.id
-                    ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)')
-                    : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)'), border:activeTaskId===task.id
-                    ? '1px solid ' + accentColor
-                    : (isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.07)'), borderRadius:12, padding:'13px 16px', marginBottom:8, cursor:'pointer', transition:'all .15s' }}>
-                  <input type="checkbox" checked={task.done}
-                    onClick={e=>e.stopPropagation()}
-                    onChange={e => setTasks(prev => prev.map(t => t.id===task.id?{...t,done:e.target.checked}:t))}
-                    style={{ width:16, height:16, cursor:'pointer', accentColor:textMain, flexShrink:0 }} />
-                  <div style={{ flex:1, fontSize:14, fontWeight:600, textDecoration:task.done?'line-through':'none', color:task.done?textFaint:textMain, fontFamily:"'Plus Jakarta Sans'" }}>
-                    {task.name}
-                  </div>
-                  <div style={{ display:'flex', gap:3, alignItems:'center' }}>
-                    {Array(task.estimatedPomodoros||1).fill(0).map((_,i)=>(
-                      <div key={i} style={{ width:8, height:8, borderRadius:'50%', background:i<(task.completedPomodoros||0)?accentColor:'rgba(255,255,255,0.15)' }}/>
-                    ))}
-                  </div>
-                  <button onClick={e=>{e.stopPropagation();setTasks(prev=>prev.filter(t=>t.id!==task.id))}}
-                    style={{ background:isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:textFaint, fontSize:18, lineHeight:1, padding:'0 2px', flexShrink:0 }}
-                    onMouseEnter={e=>e.currentTarget.style.color=textDim}
-                    onMouseLeave={e=>e.currentTarget.style.color=textFaint}>×</button>
-                </div>
-              ))}
-
-              {/* Add task */}
-              <div style={{ border:isDark ? '2px dashed rgba(255,255,255,0.1)' : '2px dashed rgba(0,0,0,0.12)', borderRadius:12, padding:'14px 16px', cursor:'text', background:isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)' }}
-                onClick={()=>document.getElementById('pom-task-inp')?.focus()}>
-                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <span style={{ fontSize:20, color:textFaint, flexShrink:0 }}>＋</span>
-                  <input id="pom-task-inp" value={newTask} onChange={e=>setNewTask(e.target.value)}
-                    onKeyDown={e=>{if(e.key==='Enter'&&newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
-                    placeholder="Add Task"
-                    style={{ flex:1, background:'transparent', border:'none', color:textDim, fontSize:14, caretColor:textMain }} />
-                </div>
-                {newTask && (
-                  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:12 }}>
-                    <span style={{ fontSize:12, color:textDim }}>Est. pomodoros:</span>
-                    <select value={newTaskEst} onChange={e=>setNewTaskEst(+e.target.value)}
-                      style={{ background:isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)', border:isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.25)', color:textMain, padding:'4px 8px', borderRadius:6, fontSize:13 }}>
-                      {Array.from({length:10},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}
-                    </select>
-                    <button onClick={()=>{if(newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
-                      style={{ background:accentColor, color:'#fff', border:'none', padding:'6px 16px', borderRadius:10, fontSize:13, fontWeight:700 }}>Save</button>
-                    <button onClick={()=>setNewTask('')}
-                      style={{ background:'transparent', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:textDim, padding:'6px 12px', borderRadius:10, fontSize:13 }}>Cancel</button>
-                  </div>
-                )}
-              </div>
-
-              {/* Templates */}
-              {templates.length > 0 && (
-                <div style={{ marginTop:12 }}>
-                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', letterSpacing:1, marginBottom:6 }}>TEMPLATES</div>
-                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                    {templates.map(t => (
-                      <button key={t.id} onClick={()=>setTasks(prev=>[...prev,{...t,id:Date.now(),completedPomodoros:0,done:false}])}
-                        style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.75)', padding:'4px 12px', borderRadius:20, fontSize:12 }}>
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            ) : (
-              timers.length >= 3 && activeTask && (
-                <div style={{ textAlign:'center', fontSize:12, color:'#475569', padding:'4px 0', flexShrink:0 }}>
-                  Focusing on: <strong style={{color:'#94a3b8'}}>{activeTask.name}</strong>
-                </div>
-              )
-            )}
-          </div>
+            
+            
+              
+                        </div>
         )}
 
         {/* ── SOUNDS TAB ── */}
@@ -1542,6 +1599,55 @@ export default function App() {
         {tab==='stats' && (
           <div style={{ flex:1, overflowY:'auto', padding:'0 16px 16px' }}>
             <h2 style={{ textAlign:'center', fontSize:13, fontWeight:700, letterSpacing:2, textTransform:'uppercase', color:'rgba(255,255,255,0.7)', marginBottom:20 }}>Today's Report</h2>
+
+            {/* Tasks section */}
+            <div style={{ maxWidth: 680, margin: '0 auto 24px' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid rgba(255,255,255,0.1)', paddingBottom:8, marginBottom:12 }}>
+                <span style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, color:'rgba(255,255,255,0.5)', textTransform:'uppercase' }}>Tasks</span>
+                <span style={{ fontSize:11, color:'rgba(255,255,255,0.4)' }}>{pendingTasks.length} remaining</span>
+              </div>
+              {tasks.map(task => (
+                <div key={task.id}
+                  onClick={() => setActiveTaskId(task.id===activeTaskId?null:task.id)}
+                  style={{ display:'flex', alignItems:'center', gap:10, background:activeTaskId===task.id?'rgba(255,255,255,0.08)':'rgba(255,255,255,0.03)', border:activeTaskId===task.id?'1px solid rgba(255,255,255,0.3)':'1px solid rgba(255,255,255,0.07)', borderRadius:10, padding:'10px 14px', marginBottom:6, cursor:'pointer' }}>
+                  <input type="checkbox" checked={task.done} onClick={e=>e.stopPropagation()}
+                    onChange={e => setTasks(prev => prev.map(t => t.id===task.id?{...t,done:e.target.checked}:t))}
+                    style={{ width:14, height:14, cursor:'pointer', flexShrink:0 }}/>
+                  <span style={{ flex:1, fontSize:13, fontWeight:500, textDecoration:task.done?'line-through':'none', color:task.done?'rgba(255,255,255,0.35)':'#fff' }}>{task.name}</span>
+                  <div style={{ display:'flex', gap:3 }}>
+                    {Array(task.estimatedPomodoros||1).fill(0).map((_,i)=>(
+                      <div key={i} style={{ width:7, height:7, borderRadius:'50%', background:i<(task.completedPomodoros||0)?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.18)' }}/>
+                    ))}
+                  </div>
+                  <button onClick={e=>{e.stopPropagation();setTasks(prev=>prev.filter(t=>t.id!==task.id))}}
+                    style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.3)', fontSize:16, cursor:'pointer', flexShrink:0 }}
+                    onMouseEnter={e=>e.currentTarget.style.color='#fff'}
+                    onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.3)'}>×</button>
+                </div>
+              ))}
+              <div style={{ border:'1px dashed rgba(255,255,255,0.15)', borderRadius:10, padding:'10px 14px', cursor:'text', background:'rgba(255,255,255,0.02)' }}
+                onClick={()=>document.getElementById('pom-task-inp-report')?.focus()}>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{ fontSize:18, color:'rgba(255,255,255,0.3)' }}>＋</span>
+                  <input id="pom-task-inp-report" value={newTask} onChange={e=>setNewTask(e.target.value)}
+                    onKeyDown={e=>{if(e.key==='Enter'&&newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
+                    placeholder="Add task (Enter to save)"
+                    style={{ flex:1, background:'transparent', border:'none', color:'#fff', fontSize:13, caretColor:'#fff' }}/>
+                </div>
+                {newTask && (
+                  <div style={{ display:'flex', gap:8, marginTop:8, alignItems:'center' }}>
+                    <select value={newTaskEst} onChange={e=>setNewTaskEst(+e.target.value)}
+                      style={{ background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', padding:'3px 6px', borderRadius:6, fontSize:12 }}>
+                      {Array.from({length:10},(_,i)=><option key={i+1} value={i+1}>{i+1}🍅</option>)}
+                    </select>
+                    <button onClick={()=>{if(newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
+                      style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', padding:'4px 14px', borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer' }}>Add</button>
+                    <button onClick={()=>setNewTask('')}
+                      style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.15)', color:'rgba(255,255,255,0.5)', padding:'4px 10px', borderRadius:8, fontSize:12, cursor:'pointer' }}>Cancel</button>
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Stat cards */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:10, marginBottom:16 }}>
