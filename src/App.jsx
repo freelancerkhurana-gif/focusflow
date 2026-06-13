@@ -28,8 +28,8 @@ function Ring({ secsLeft, total, color, glow, size, children }) {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const PHASE_COLORS = {
   pomodoro:   '#4A1A1A',
-  shortBreak: '#0D1B2A',
-  longBreak:  '#0D1B2A',
+  shortBreak: '#1A3A5C',
+  longBreak:  '#1A3A5C',
 }
 
 const NOISE_OPTIONS = [
@@ -1013,8 +1013,7 @@ export default function App() {
       textarea::placeholder { color: #334155 !important; }
       html, body { overflow: hidden !important; height: 100% !important; }
       #root { height: 100% !important; overflow: hidden !important; }
-      .timer-grid > div { background: transparent !important; border: none !important; box-shadow: none !important; }
-      .timer-card-wrap { transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important; opacity: 1 !important; }
+            .timer-card-wrap { transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important; opacity: 1 !important; }
       @media(max-width:767px){.timer-grid{grid-template-columns:1fr!important}.sw-grid{grid-template-columns:1fr!important}}
     `
     document.head.appendChild(s)
@@ -1026,9 +1025,10 @@ export default function App() {
   const TimerCard = ({ timer, count }) => {
     const isLarge  = count === 1
     const isMed    = count === 2
-    const digitPx  = isMobile ? 76 : isLarge ? 116 : isMed ? 92 : 70
-    const padV     = isLarge ? 28 : isMed ? 20 : 14
-    const padH     = isLarge ? 28 : isMed ? 22 : 16
+    const isSmallGrid = count >= 3
+    const digitPx  = isMobile ? 76 : isLarge ? 121 : isMed ? 96 : 84
+    const padV     = isLarge ? 12 : isMed ? 10 : 10
+    const padH     = isLarge ? 24 : isMed ? 20 : 14
 
     const modeColor = {
       pomodoro:   '#BA4949',
@@ -1038,29 +1038,47 @@ export default function App() {
 
     return (
       <div className="timer-card-wrap" style={{
-    background: 'rgba(0,0,0,0.22)',
-    border: '1px solid rgba(255,255,255,0.15)',
-    borderTop: '3px solid rgba(255,255,255,0.55)',
-    borderRadius: 12,
+    background: 'rgba(0,0,0,0.18)',
+    border: '1px solid rgba(255,255,255,0.18)',
+    borderTop: '2px solid rgba(255,255,255,0.55)',
+    borderRadius: 10,
+    boxShadow: 'inset 0 0 20px rgba(0,0,0,0.15), 0 2px 12px rgba(0,0,0,0.2)',
     padding: `${padV}px ${padH}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 0,
     position: 'relative',
     width: '100%',
+    height: '100%',
     boxSizing: 'border-box',
+    minHeight: 0,
   }}>
         {/* Delete button */}
         {count > 1 && (
           <button onClick={() => removeTimer(timer.id)}
-            style={{ position:'absolute', top:8, right:10, background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:20, lineHeight:1, padding:'0 4px' }}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 10,
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: 'rgba(255,255,255,0.5)',
+              fontSize: 14,
+              lineHeight: 1,
+              padding: '2px 7px',
+              borderRadius: 20,
+              cursor: 'pointer',
+              zIndex: 2,
+            }}
             onMouseEnter={e => e.currentTarget.style.color='#fff'}
-            onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.4)'}>
+            onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.5)'}>
             ×
           </button>
         )}
 
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:16, paddingTop: isLarge ? 18 : isMed ? 14 : 10 }}>
         {/* Name — editable */}
         {editingId === timer.id ? (
           <input
@@ -1099,7 +1117,7 @@ export default function App() {
     }
   }}
             autoFocus
-            style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, textAlign:'center', marginBottom:8, letterSpacing:1, width:160 }}
+            style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, textAlign:'center', letterSpacing:1, width:160 }}
           />
         ) : (
           <div
@@ -1111,7 +1129,6 @@ export default function App() {
               letterSpacing: 1.5,
               textTransform: 'uppercase',
               cursor: 'pointer',
-              marginBottom: 8,
               padding: '4px 14px',
               borderRadius: 20,
               background: 'rgba(255,255,255,0.08)',
@@ -1131,21 +1148,25 @@ export default function App() {
         {/* Task line */}
         
         {/* Mode tabs — per timer */}
-        <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+        <div style={{ display:'flex', gap:8 }}>
           <button
             onClick={() => { changeTimerPhase(timer.id, 'pomodoro'); setTimerMode('pomodoro') }}
             style={{
               padding: '6px 20px',
               borderRadius: 100,
-              border: 'none',
+              border: timer.mode === 'pomodoro'
+                ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
+                : 'none',
               background: timer.mode === 'pomodoro'
-                ? (isDark ? '#6B2020' : 'rgba(255,255,255,0.25)')
+                ? (isDark ? '#6B2020' : 'rgba(255,255,255,0.28)')
                 : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.08)'),
               color: '#fff',
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: 0.5,
-              boxShadow: timer.mode === 'pomodoro' && isDark ? '0 0 14px rgba(107,32,32,0.6)' : 'none',
+              boxShadow: timer.mode === 'pomodoro'
+                ? (isDark ? '0 0 14px rgba(107,32,32,0.6)' : 'inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.15)')
+                : 'none',
             }}>
             Work
           </button>
@@ -1154,25 +1175,54 @@ export default function App() {
             style={{
               padding: '6px 20px',
               borderRadius: 100,
-              border: 'none',
+              border: timer.mode !== 'pomodoro'
+                ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
+                : 'none',
               background: timer.mode !== 'pomodoro'
-                ? (isDark ? '#0D2B4A' : 'rgba(255,255,255,0.25)')
+                ? (isDark ? '#2E7FBF' : 'rgba(255,255,255,0.28)')
                 : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.08)'),
               color: '#fff',
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: 0.5,
-              boxShadow: timer.mode !== 'pomodoro' && isDark ? '0 0 14px rgba(13,43,74,0.7)' : 'none',
+              boxShadow: timer.mode !== 'pomodoro'
+                ? (isDark ? '0 0 14px rgba(46,127,191,0.7)' : 'inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.15)')
+                : 'none',
             }}>
             Break
           </button>
         </div>
+        </div>
 
         
         {/* Countdown */}
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:20, marginTop:16, width:'100%', justifyContent:'center', paddingRight:8 }}>
+        <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 0,
+            marginBottom: 0,
+            width: '100%',
+            justifyContent: 'center',
+            paddingRight: 8,
+          }}>
           <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.max(60,timer.secsLeft-60))}
-            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:34, height:34, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}
+            style={{
+    background: 'rgba(0,0,0,0.2)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    color: 'rgba(255,255,255,0.6)',
+    width: 34,
+    height: 34,
+    borderRadius: '50%',
+    fontSize: 18,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    lineHeight: 1,
+    padding: 0,
+    cursor: 'pointer',
+  }}
             disabled={timer.running}>−</button>
 
           <div style={{ textAlign:'center' }}>
@@ -1182,33 +1232,48 @@ export default function App() {
           </div>
 
           <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.min(3600,timer.secsLeft+60))}
-            style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'rgba(255,255,255,0.6)', width:34, height:34, borderRadius:'50%', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}
+            style={{
+    background: 'rgba(0,0,0,0.2)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    color: 'rgba(255,255,255,0.6)',
+    width: 34,
+    height: 34,
+    borderRadius: '50%',
+    fontSize: 18,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    lineHeight: 1,
+    padding: 0,
+    cursor: 'pointer',
+  }}
             disabled={timer.running}>+</button>
         </div>
 
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14, paddingBottom: isLarge ? 18 : isMed ? 14 : 10 }}>
         <div style={{
     display: 'flex',
     gap: 8,
     justifyContent: 'center',
-    marginBottom: 6,
     width: '100%',
   }}>
     <button
       onClick={() => toggleTimer(timer.id)}
       style={{
-        width: isLarge ? 140 : isMed ? 110 : 88,
-        background: '#fff',
-        color: bgColor,
-        border: 'none',
-        padding: isLarge ? '12px 0' : isMed ? '10px 0' : '8px 0',
-        borderRadius: 6,
-        fontSize: isLarge ? 14 : isMed ? 12 : 11,
-        fontWeight: 900,
-        letterSpacing: 2,
-        cursor: 'pointer',
-        transition: 'opacity 0.15s ease',
-        flexShrink: 0,
-      }}
+    padding: isLarge ? '10px 32px' : isMed ? '8px 24px' : '7px 18px',
+    borderRadius: 100,
+    border: '1px solid rgba(255,255,255,0.55)',
+    background: '#fff',
+    color: bgColor,
+    fontSize: isLarge ? 14 : isMed ? 12 : 11,
+    fontWeight: 900,
+    letterSpacing: 2,
+    cursor: 'pointer',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.15)',
+    flexShrink: 0,
+    transition: 'opacity 0.15s ease',
+  }}
       onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
       onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
       {timer.running ? 'PAUSE' : 'START'}
@@ -1216,27 +1281,27 @@ export default function App() {
     <button
       onClick={() => resetTimer(timer.id)}
       style={{
-        width: isLarge ? 140 : isMed ? 110 : 88,
-        background: surfBg,
-        color: '#fff',
-        border: `1px solid ${borderCol}`,
-        padding: isLarge ? '12px 0' : isMed ? '10px 0' : '8px 0',
-        borderRadius: 6,
-        fontSize: isLarge ? 14 : isMed ? 12 : 11,
-        fontWeight: 700,
-        letterSpacing: 1,
-        cursor: 'pointer',
-        transition: 'all 0.15s ease',
-        flexShrink: 0,
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)' }}>
+    padding: isLarge ? '10px 32px' : isMed ? '8px 24px' : '7px 18px',
+    borderRadius: 100,
+    border: '1px solid rgba(255,255,255,0.3)',
+    background: 'rgba(255,255,255,0.12)',
+    color: '#fff',
+    fontSize: isLarge ? 14 : isMed ? 12 : 11,
+    fontWeight: 700,
+    letterSpacing: 1,
+    cursor: 'pointer',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(0,0,0,0.1)',
+    flexShrink: 0,
+    transition: 'all 0.15s ease',
+  }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.45)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)' }}>
       ↺ RESET
     </button>
   </div>
 
         {/* Preset pills */}
-        <div style={{ display:'flex', gap:6, marginTop:6, marginBottom:0 }}>
+        <div style={{ display:'flex', gap:6, marginTop:0, marginBottom:0 }}>
           {[{label:'25/5',work:25,brk:5},{label:'30/10',work:30,brk:10},{label:'45/15',work:45,brk:15}].map(p => {
             const active = timer.mode === 'pomodoro'
               ? Math.round((timer.totalSecs || timer.secsLeft) / 60) === p.work
@@ -1272,6 +1337,7 @@ export default function App() {
               </button>
             )
           })}
+        </div>
         </div>
 
               </div>
@@ -1401,15 +1467,36 @@ export default function App() {
         <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Logo */}
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <img src="/icon-192.png" alt="" style={{ height: 52, width: 'auto', objectFit: 'contain', borderRadius: 10 }}
-              onError={e => { e.currentTarget.style.display='none' }} />
-            {streak > 0 && (
-              <span style={{ fontSize:13, fontWeight:700, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'4px 12px' }}>🔥 {streak}</span>
-            )}
-          </div>
+            <span style={{
+    fontFamily: "'Outfit', -apple-system, sans-serif",
+    fontSize: 22,
+    fontWeight: 800,
+    letterSpacing: -0.5,
+    color: '#fff',
+    userSelect: 'none',
+  }}>
+    Pomodoros<span style={{
+      color: 'rgba(255,255,255,0.55)',
+      fontWeight: 300,
+      fontSize: 20,
+    }}>.io</span>
+  </span>
+                      </div>
 
           {/* Right buttons */}
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            {streak > 0 && (
+              <span style={{
+                fontSize: 12,
+                fontWeight: 700,
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 20,
+                padding: '4px 12px',
+                color: '#fff',
+                marginRight: 2,
+              }}>🔥 {streak}</span>
+            )}
                         <button
               onClick={() => setIsDark(d => !d)}
               title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
@@ -1503,24 +1590,48 @@ export default function App() {
             flexDirection: 'column',
             overflow: 'hidden',
             height: '100%',
+            padding: timers.length <= 2 ? '4px 24px 12px' : '4px 8px 12px',
+            boxSizing: 'border-box',
+            alignItems: 'center',
           }}>
             {/* Timer grid */}
             <div className="timer-grid" style={{
               display: 'grid',
               gridTemplateColumns: timers.length === 1 ? '1fr' : '1fr 1fr',
-              gridTemplateRows: timers.length >= 3 ? '1fr 1fr' : 'auto',
+              gridTemplateRows: timers.length >= 3 ? '1fr 1fr' : '1fr',
               gap: 10,
               flex: 1,
-              height: timers.length >= 3 ? '100%' : 'auto',
-              overflow: 'visible',
               width: '100%',
-              maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 700 : '100%',
+              maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 720 : 940,
               margin: '0 auto',
               alignItems: 'stretch',
-              alignContent: 'stretch',
-              transition: 'grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1)',
+              alignContent: timers.length <= 2 ? 'center' : 'stretch',
+              justifyContent: 'center',
+              justifyItems: 'stretch',
+              padding: '0 4px',
+              boxSizing: 'border-box',
+              height: timers.length <= 2 ? 'auto' : '100%',
+              maxHeight: timers.length === 1 ? '82vh' : timers.length === 2 ? '80vh' : '100%',
+              minHeight: 0,
             }}>
-              {(timers || []).map(t => <TimerCard key={t.id} timer={t} count={timers.length} />)}
+              {(timers || []).map((t, idx) => (
+                <div key={t.id} style={{
+                  gridColumn: timers.length === 3 && idx === 2 ? '1 / -1' : 'auto',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  width: '100%',
+                  minHeight: 0,
+                }}>
+                  <div style={{
+                    width: timers.length === 3 && idx === 2 ? '50%' : '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minHeight: 0,
+                  }}>
+                    <TimerCard timer={t} count={timers.length} />
+                  </div>
+                </div>
+              ))}
             </div>
 
             
