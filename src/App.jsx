@@ -53,6 +53,11 @@ const WASH_COLORS = [
   { label: 'Charcoal', bg: '#36454F', fg: '#fff' },
 ]
 
+// ─── BACKGROUND IMAGES ──────────────────────────────────────────────────────────
+const BG_WORK  = '/BG_WORK.png'
+const BG_BREAK = '/BG_BREAK.png'
+const BG_NIGHT = '/BG_NIGHT.png'
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 const fmtTime = (s) =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -433,8 +438,13 @@ export default function App() {
     const saved = localStorage.getItem('pom_theme_dark')
     return saved !== null ? JSON.parse(saved) : false
   })
-  const bgColor = isDark ? '#0a0a0a' : (PHASE_COLORS[timerMode] || PHASE_COLORS.pomodoro)
+  const bgColor = isDark ? '#0a0a0a' : 'transparent'
   const accentColor = isDark ? '#1a1a1a' : bgColor
+  const currentBgImage = isDark
+    ? BG_NIGHT
+    : (timerMode === 'shortBreak' || timerMode === 'longBreak'
+        ? BG_BREAK
+        : BG_WORK)
   const meshOpacity = isDark ? 0 : 1
   const textMain = '#fff'
   const textDim = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.7)'
@@ -661,6 +671,7 @@ export default function App() {
         const newCycles = isPomodoro ? t.cyclesDone + 1 : t.cyclesDone
         confetti()
         showToast(isPomodoro ? `🍅 ${t.name} complete! Take a break.` : `⚡ Break over — back to focus!`)
+        setTimerMode(nextMode === 'pomodoro' ? 'pomodoro' : 'shortBreak')
         // determine next mode
         let nextMode
         if (isPomodoro) {
@@ -1000,7 +1011,7 @@ export default function App() {
     const s = document.createElement('style')
     s.id = 'pom-global'
     s.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
       *, *::before, *::after { box-sizing: border-box; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
       *::-webkit-scrollbar { width: 4px; } *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
       body, html { margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; background: #0f172a; }
@@ -1048,11 +1059,13 @@ export default function App() {
 
     return (
       <div className="timer-card-wrap" style={{
-    background: 'rgba(0,0,0,0.18)',
+    background: 'rgba(255,255,255,0.08)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
     border: '1px solid rgba(255,255,255,0.18)',
-    borderTop: '2px solid rgba(255,255,255,0.55)',
-    borderRadius: 10,
-    boxShadow: 'inset 0 0 20px rgba(0,0,0,0.15), 0 2px 12px rgba(0,0,0,0.2)',
+    borderTop: '1px solid rgba(255,255,255,0.3)',
+    borderRadius: 24,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
     padding: `${padV}px ${padH}px`,
     display: 'flex',
     flexDirection: 'column',
@@ -1168,15 +1181,13 @@ export default function App() {
                 ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
                 : 'none',
               background: timer.mode === 'pomodoro'
-                ? (isDark ? '#6B2020' : 'rgba(255,255,255,0.28)')
-                : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.08)'),
+                ? 'rgba(255,255,255,0.28)'
+                : 'rgba(255,255,255,0.08)',
               color: '#fff',
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: 0.5,
-              boxShadow: timer.mode === 'pomodoro'
-                ? (isDark ? '0 0 14px rgba(107,32,32,0.6)' : 'inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.15)')
-                : 'none',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.15)',
             }}>
             Work
           </button>
@@ -1189,15 +1200,13 @@ export default function App() {
                 ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
                 : 'none',
               background: timer.mode !== 'pomodoro'
-                ? (isDark ? '#2E7FBF' : 'rgba(255,255,255,0.28)')
-                : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.08)'),
+                ? 'rgba(255,255,255,0.28)'
+                : 'rgba(255,255,255,0.08)',
               color: '#fff',
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: 0.5,
-              boxShadow: timer.mode !== 'pomodoro'
-                ? (isDark ? '0 0 14px rgba(46,127,191,0.7)' : 'inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.15)')
-                : 'none',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.15)',
             }}>
             Break
           </button>
@@ -1236,7 +1245,7 @@ export default function App() {
             disabled={timer.running}>−</button>
 
           <div style={{ textAlign:'center' }}>
-            <div style={{ fontSize:digitPx, fontWeight:700, color:'#fff', letterSpacing:-2, lineHeight:1, userSelect:'none', fontVariantNumeric:'tabular-nums', animation: timer.running?'none':'none' }}>
+            <div style={{ fontSize:digitPx, fontWeight:300, color:'#fff', letterSpacing:-2, lineHeight:1, userSelect:'none', fontVariantNumeric:'tabular-nums', animation: timer.running?'none':'none', fontFamily: "'Outfit', sans-serif" }}>
               {fmtTime(timer.secsLeft)}
             </div>
           </div>
@@ -1274,18 +1283,21 @@ export default function App() {
     padding: isLarge ? '10px 32px' : isMed ? '8px 24px' : '7px 18px',
     borderRadius: 100,
     border: '1px solid rgba(255,255,255,0.55)',
-    background: '#fff',
-    color: bgColor,
+    background: 'rgba(255,255,255,0.22)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    color: '#fff',
     fontSize: isLarge ? 14 : isMed ? 12 : 11,
-    fontWeight: 900,
+    fontWeight: 700,
     letterSpacing: 2,
     cursor: 'pointer',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.15)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 12px rgba(0,0,0,0.2)',
     flexShrink: 0,
-    transition: 'opacity 0.15s ease',
+    transition: 'all 0.15s ease',
+    fontFamily: "'Outfit', sans-serif",
   }}
-      onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
-      onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.32)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.75)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.55)' }}>
       {timer.running ? 'PAUSE' : 'START'}
     </button>
     <button
@@ -1358,7 +1370,7 @@ export default function App() {
   const SWCard = ({ sw, count }) => {
     const isLarge = count === 1
     return (
-      <div style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.18)', borderTop:'3px solid rgba(255,255,255,0.6)', borderRadius:12, padding: isLarge?'32px 40px':'20px 24px', display:'flex', flexDirection:'column', alignItems:'center', position:'relative' }}>
+      <div style={{ background:'rgba(255,255,255,0.08)', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', border:'1px solid rgba(255,255,255,0.18)', borderTop:'1px solid rgba(255,255,255,0.3)', borderRadius:24, boxShadow:'0 8px 32px rgba(0,0,0,0.25)', padding: isLarge?'32px 40px':'20px 24px', display:'flex', flexDirection:'column', alignItems:'center', position:'relative' }}>
         {count > 1 && (
           <button onClick={() => removeSW(sw.id)} style={{ position:'absolute', top:8, right:10, background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:20 }}
             onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.4)'}>×</button>
@@ -1436,7 +1448,6 @@ export default function App() {
   // ─── RENDER ──────────────────────────────────────────────────────────────────
   return (
     <div style={{
-      background: bgColor,
       width: '100vw',
       height: '100vh',
       overflow: 'hidden',
@@ -1447,26 +1458,50 @@ export default function App() {
       position: 'fixed',
       top: 0,
       left: 0,
-      transition: 'background 0.4s ease, color 0.3s ease',
     }}>
-      {/* Animated mesh background */}
+      {/* Background image layers with smooth crossfade */}
+      {[BG_WORK, BG_BREAK, BG_NIGHT].map(img => (
+        <div
+          key={img}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: 0,
+            pointerEvents: 'none',
+            backgroundImage: `url('${img}')`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center center',
+            backgroundRepeat: 'no-repeat',
+            opacity: currentBgImage === img ? 1 : 0,
+            transition: 'opacity 0.9s ease',
+          }}
+        />
+      ))}
+
+      {/* Color overlay layer */}
       <div style={{
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        zIndex: 0, pointerEvents: 'none',
-        background: `
-          radial-gradient(circle at 15% 15%, ${accentColor}22 0%, transparent 45%),
-          radial-gradient(circle at 85% 85%, ${accentColor}14 0%, transparent 45%),
-          radial-gradient(circle at 50% 50%, rgba(99,102,241,0.06) 0%, transparent 60%)
-        `,
-        filter: 'blur(60px)',
-        animation: 'meshFloat 8s ease-in-out infinite',
-        opacity: meshOpacity,
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        zIndex: 1,
+        pointerEvents: 'none',
+        background: isDark
+          ? 'rgba(0,0,0,0.65)'
+          : timerMode === 'shortBreak' || timerMode === 'longBreak'
+            ? 'rgba(0,5,15,0.40)'
+            : 'rgba(0,8,18,0.30)',
+        transition: 'background 0.6s ease',
       }}/>
 
       {/* Main content wrapper */}
       <div style={{
         position: 'relative',
-        zIndex: 1,
+        zIndex: 2,
         display: 'flex',
         flexDirection: 'column',
         height: '100vh',
@@ -1474,21 +1509,21 @@ export default function App() {
         overflow: 'hidden',
       }}>
         {/* ══ HEADER ══════════════════════════════════════════════════════════════ */}
-        <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: 'transparent', backdropFilter: 'none', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Logo */}
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <span style={{
-    fontFamily: "'Outfit', -apple-system, sans-serif",
-    fontSize: 22,
-    fontWeight: 800,
-    letterSpacing: -0.5,
+    fontFamily: "'Caveat', cursive",
+    fontSize: 28,
+    fontWeight: 700,
     color: '#fff',
     userSelect: 'none',
+    letterSpacing: 0.5,
+    textShadow: '0 2px 12px rgba(0,0,0,0.3)',
   }}>
-    Pomodoros<span style={{
-      color: 'rgba(255,255,255,0.55)',
-      fontWeight: 300,
-      fontSize: 20,
+    pomodoros<span style={{
+      color: 'rgba(255,255,255,0.7)',
+      fontWeight: 500,
     }}>.io</span>
   </span>
                       </div>
@@ -1559,8 +1594,8 @@ export default function App() {
         width: '100%',
         textAlign: 'center',
         padding: '5px 16px',
-        background: 'rgba(0,0,0,0.15)',
-        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(0,0,0,0.25)',
+        backdropFilter: 'blur(8px)',
         fontSize: 11,
         fontWeight: 700,
         letterSpacing: 1,
@@ -1573,10 +1608,10 @@ export default function App() {
 
       {/* ══ NAV TABS ════════════════════════════════════════════════════════════ */}
       <div style={{ flexShrink: 0, padding: '8px 16px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto' }}>
-        <div style={{ display:'flex', background:isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)', border:isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.1)', borderRadius:100, padding:5, gap:2 }}>
+        <div style={{ display:'flex', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius:100, padding:5, gap:2, backdropFilter: 'blur(12px)' }}>
           {[{k:'timer',l:'Pomodoro'},{k:'sounds',l:'Sounds'},{k:'notes',l:'Notes'},{k:'stopwatch',l:'Stopwatch'},{k:'stats',l:'Report'}].map(t => (
             <button key={t.k} className="tab-btn" onClick={()=>setTab(t.k)}
-              style={{ background:tab===t.k?accentColor:'transparent', color:tab===t.k?'#fff':'#64748b', border:'none', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:tab===t.k?700:500, letterSpacing:.3 }}>
+              style={{ background:tab===t.k?'rgba(255,255,255,0.9)':'transparent', color:tab===t.k?'#1a0a2e':'rgba(255,255,255,0.75)', border:'none', padding:'6px 13px', borderRadius:100, fontSize:12, fontFamily: "'Outfit', sans-serif", fontWeight:tab===t.k?700:500, letterSpacing:.3 }}>
               {t.l}
             </button>
           ))}
@@ -1586,7 +1621,7 @@ export default function App() {
         {(tab==='timer'||tab==='stopwatch') && (
           <button onClick={tab==='timer'?addTimer:addStopwatch}
             disabled={(tab==='timer'?timers:stopwatches).length>=4}
-            style={{ background:isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', border:isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)', color:isDark ? '#94a3b8' : '#475569', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600, opacity:(tab==='timer'?timers:stopwatches).length>=4?.4:1 }}>
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.8)', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600, backdropFilter: 'blur(8px)', opacity:(tab==='timer'?timers:stopwatches).length>=4?.4:1 }}>
             + Add {tab==='timer'?'Timer':'Stopwatch'}
           </button>
         )}
@@ -2162,15 +2197,27 @@ export default function App() {
       <div style={{
         position: 'fixed',
         inset: 0,
-        background: isDark ? '#0a0a0a' : (PHASE_COLORS[displayTimer?.mode === 'pomodoro' ? 'pomodoro' : 'shortBreak'] || '#4A1A1A'),
         zIndex: 9000,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'background 0.5s ease',
+        backgroundImage: `url('${currentBgImage}')`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
       }}>
-        {/* Exit button */}
+        {/* Dark overlay for blurred background */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(0,0,0,0.55)',
+          backdropFilter: 'blur(18px)',
+          WebkitBackdropFilter: 'blur(18px)',
+          zIndex: 0,
+        }}/>
+        
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+          {/* Exit button */}
         <button
           onClick={() => setFocusMode(false)}
           style={{
@@ -2212,35 +2259,34 @@ export default function App() {
           }}>
             {/* Timer name */}
             <div style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: 'rgba(255,255,255,0.6)',
-              letterSpacing: 2,
-              textTransform: 'uppercase',
+              fontSize: 22,
+              color: 'rgba(255,255,255,0.7)',
+              letterSpacing: 3,
+              fontFamily: "'Caveat', cursive",
             }}>
               {displayTimer.name}
             </div>
 
             {/* Big time display */}
             <div style={{
-              fontSize: 'clamp(80px, 18vw, 180px)',
-              fontWeight: 800,
+              fontSize: 'clamp(96px, 20vw, 200px)',
+              fontWeight: 300,
               color: '#fff',
+              fontFamily: "'Outfit', sans-serif",
               letterSpacing: -4,
+              textShadow: '0 4px 32px rgba(0,0,0,0.4)',
               lineHeight: 1,
               fontVariantNumeric: 'tabular-nums',
-              fontFamily: "'Outfit', sans-serif",
             }}>
               {fmtTime(displayTimer.secsLeft)}
             </div>
 
             {/* Phase label */}
             <div style={{
-              fontSize: 12,
-              fontWeight: 600,
+              fontSize: 11,
               color: 'rgba(255,255,255,0.55)',
-              letterSpacing: 3,
-              textTransform: 'uppercase',
+              letterSpacing: 4,
+              fontFamily: "'Outfit', sans-serif",
             }}>
               {displayTimer.mode === 'pomodoro' ? 'FOCUS SESSION' : 'BREAK TIME'}
             </div>
@@ -2250,39 +2296,41 @@ export default function App() {
               <button
                 onClick={() => toggleTimer(displayTimer.id)}
                 style={{
-                  padding: '14px 48px',
+                  padding: '16px 56px',
                   borderRadius: 100,
-                  border: '1px solid rgba(255,255,255,0.5)',
-                  background: '#fff',
-                  color: isDark ? '#0a0a0a' : (PHASE_COLORS[displayTimer.mode === 'pomodoro' ? 'pomodoro' : 'shortBreak'] || '#4A1A1A'),
+                  border: '1px solid rgba(255,255,255,0.6)',
+                  background: 'rgba(255,255,255,0.95)',
+                  color: '#1a0a20',
                   fontSize: 16,
-                  fontWeight: 900,
-                  letterSpacing: 2,
+                  fontWeight: 700,
+                  letterSpacing: 3,
                   cursor: 'pointer',
                   fontFamily: "'Outfit', sans-serif",
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6), 0 4px 16px rgba(0,0,0,0.2)',
+                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
                 }}>
                 {displayTimer.running ? 'PAUSE' : 'START'}
               </button>
               <button
                 onClick={() => resetTimer(displayTimer.id)}
                 style={{
-                  padding: '14px 32px',
+                  padding: '16px 32px',
                   borderRadius: 100,
-                  border: '1px solid rgba(255,255,255,0.3)',
+                  border: '1px solid rgba(255,255,255,0.25)',
                   background: 'rgba(255,255,255,0.12)',
                   color: '#fff',
                   fontSize: 16,
                   fontWeight: 700,
-                  letterSpacing: 1,
+                  letterSpacing: 2,
                   cursor: 'pointer',
                   fontFamily: "'Outfit', sans-serif",
+                  backdropFilter: 'blur(8px)',
                 }}>
                 ↺ RESET
               </button>
             </div>
           </div>
         )}
+        </div>
       </div>
     )
   })()}
