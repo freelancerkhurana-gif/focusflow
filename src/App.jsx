@@ -426,6 +426,7 @@ export default function App() {
   const [onboardStep, setOnboardStep] = useState(1)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
   const [installPrompt, setInstallPrompt] = useState(null)
+  const [focusMode, setFocusMode] = useState(false)
 
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
@@ -789,6 +790,15 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [timers, toggleTimer, resetTimer])
+
+  // ─── FOCUS MODE ESCAPE KEY ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && focusMode) setFocusMode(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focusMode])
 
   // ─── RESIZE ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1485,32 +1495,16 @@ export default function App() {
 
           {/* Right buttons */}
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            {streak > 0 && (
-              <span style={{
-                fontSize: 12,
-                fontWeight: 700,
-                background: 'rgba(255,255,255,0.08)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 20,
-                padding: '4px 12px',
-                color: '#fff',
-                marginRight: 2,
-              }}>🔥 {streak}</span>
-            )}
-                        <button
+            <button
               onClick={() => setIsDark(d => !d)}
               title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
               style={{
                 width: 38,
                 height: 38,
                 borderRadius: '50%',
-                border: isDark
-                  ? '1px solid rgba(255,255,255,0.15)'
-                  : '1px solid rgba(0,0,0,0.15)',
-                background: isDark
-                  ? 'rgba(255,255,255,0.08)'
-                  : 'rgba(0,0,0,0.06)',
-                color: isDark ? '#f8fafc' : '#0f172a',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.1)',
+                color: '#fff',
                 fontSize: 17,
                 display: 'flex',
                 alignItems: 'center',
@@ -1520,16 +1514,43 @@ export default function App() {
               }}>
               {isDark ? '☀️' : '🌙'}
             </button>
+            <button
+              onClick={() => setFocusMode(f => !f)}
+              title="Focus Mode — show only the running timer"
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: '50%',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: focusMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                color: '#fff',
+                fontSize: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}>
+              ⛶
+            </button>
             {[
               { icon:'🖥', tip:'Color Wash Mode', fn: openWashMode },
-              { icon:'⚙️', tip:'Settings', fn:()=>{ setTempSettings(settings); setShowSettings(true) } },
               { icon:'?', tip:'Keyboard Shortcuts', fn:()=>setShowKeyHelp(true) },
             ].map(b => (
               <button key={b.icon} className="icon-btn" onClick={b.fn} title={b.tip}
-                style={{ background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)', color:'#94a3b8', width:38, height:38, borderRadius:'50%', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                style={{ background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', width:38, height:38, borderRadius:'50%', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>
                 {b.icon}
               </button>
             ))}
+            {streak > 0 && (
+              <span style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: 'rgba(255,255,255,0.75)',
+                marginLeft: 4,
+                letterSpacing: 0.3,
+              }}>🔥 {streak}</span>
+            )}
                                   </div>
         </div>
 
@@ -2133,6 +2154,138 @@ export default function App() {
           ))}
         </div>
       )}
+
+  {focusMode && (() => {
+    const runningTimer = (timers || []).find(t => t.running)
+    const displayTimer = runningTimer || timers[0]
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: isDark ? '#0a0a0a' : (PHASE_COLORS[displayTimer?.mode === 'pomodoro' ? 'pomodoro' : 'shortBreak'] || '#4A1A1A'),
+        zIndex: 9000,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'background 0.5s ease',
+      }}>
+        {/* Exit button */}
+        <button
+          onClick={() => setFocusMode(false)}
+          style={{
+            position: 'absolute',
+            top: 20,
+            right: 20,
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            color: '#fff',
+            fontSize: 13,
+            padding: '6px 16px',
+            borderRadius: 20,
+            cursor: 'pointer',
+            fontWeight: 600,
+            letterSpacing: 0.5,
+          }}>
+          ✕ Exit Focus Mode
+        </button>
+
+        {/* ESC hint */}
+        <div style={{
+          position: 'absolute',
+          top: 28,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontSize: 11,
+          color: 'rgba(255,255,255,0.35)',
+          letterSpacing: 1,
+        }}>
+          Press ESC to exit
+        </div>
+
+        {displayTimer && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 20,
+          }}>
+            {/* Timer name */}
+            <div style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: 'rgba(255,255,255,0.6)',
+              letterSpacing: 2,
+              textTransform: 'uppercase',
+            }}>
+              {displayTimer.name}
+            </div>
+
+            {/* Big time display */}
+            <div style={{
+              fontSize: 'clamp(80px, 18vw, 180px)',
+              fontWeight: 800,
+              color: '#fff',
+              letterSpacing: -4,
+              lineHeight: 1,
+              fontVariantNumeric: 'tabular-nums',
+              fontFamily: "'Outfit', sans-serif",
+            }}>
+              {fmtTime(displayTimer.secsLeft)}
+            </div>
+
+            {/* Phase label */}
+            <div style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'rgba(255,255,255,0.55)',
+              letterSpacing: 3,
+              textTransform: 'uppercase',
+            }}>
+              {displayTimer.mode === 'pomodoro' ? 'FOCUS SESSION' : 'BREAK TIME'}
+            </div>
+
+            {/* Controls */}
+            <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+              <button
+                onClick={() => toggleTimer(displayTimer.id)}
+                style={{
+                  padding: '14px 48px',
+                  borderRadius: 100,
+                  border: '1px solid rgba(255,255,255,0.5)',
+                  background: '#fff',
+                  color: isDark ? '#0a0a0a' : (PHASE_COLORS[displayTimer.mode === 'pomodoro' ? 'pomodoro' : 'shortBreak'] || '#4A1A1A'),
+                  fontSize: 16,
+                  fontWeight: 900,
+                  letterSpacing: 2,
+                  cursor: 'pointer',
+                  fontFamily: "'Outfit', sans-serif",
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6), 0 4px 16px rgba(0,0,0,0.2)',
+                }}>
+                {displayTimer.running ? 'PAUSE' : 'START'}
+              </button>
+              <button
+                onClick={() => resetTimer(displayTimer.id)}
+                style={{
+                  padding: '14px 32px',
+                  borderRadius: 100,
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  background: 'rgba(255,255,255,0.12)',
+                  color: '#fff',
+                  fontSize: 16,
+                  fontWeight: 700,
+                  letterSpacing: 1,
+                  cursor: 'pointer',
+                  fontFamily: "'Outfit', sans-serif",
+                }}>
+                ↺ RESET
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  })()}
       </div>
     </div>
   )
