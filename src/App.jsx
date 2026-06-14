@@ -1035,7 +1035,14 @@ export default function App() {
       html, body { overflow: hidden !important; height: 100% !important; }
       #root { height: 100% !important; overflow: hidden !important; }
             .timer-card-wrap { transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important; opacity: 1 !important; }
-      @media(max-width:767px){.timer-grid{grid-template-columns:1fr!important}.sw-grid{grid-template-columns:1fr!important}}
+      @media (max-width: 767px) {
+    .timer-grid { grid-template-columns: 1fr !important; }
+    .sw-grid { grid-template-columns: 1fr !important; }
+  }
+  @media (max-width: 480px) {
+    .timer-grid { padding: 0 4px !important; gap: 8px !important; }
+    .yt-player { display: none !important; }
+  }
     `
     document.head.appendChild(s)
     return () => document.head.removeChild(s)
@@ -2335,6 +2342,39 @@ export default function App() {
     )
   })()}
       </div>
+
+      {/* SoundCloud Music Player */}
+  <div
+    className="yt-player"
+    style={{
+      position: 'fixed',
+      bottom: 20,
+      left: 20,
+      zIndex: 500,
+      borderRadius: 12,
+      overflow: 'hidden',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+      border: '1px solid rgba(255,255,255,0.18)',
+      backdropFilter: 'blur(12px)',
+      WebkitBackdropFilter: 'blur(12px)',
+      width: 252,
+      opacity: 0.93,
+      transition: 'opacity 0.2s ease',
+    }}
+    onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+    onMouseLeave={e => e.currentTarget.style.opacity = '0.93'}
+  >
+    <iframe
+      title="Pomodoros.io Focus Music"
+      width="252"
+      height="137"
+      scrolling="no"
+      frameBorder="no"
+      allow="autoplay; encrypted-media"
+      src="https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/playlists/soundcloud%253Aplaylists%253A2252642798&color=%23ff5500&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=true"
+      style={{ display: 'block' }}
+    />
+  </div>
     </div>
   )
 }
