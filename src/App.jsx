@@ -54,9 +54,10 @@ const WASH_COLORS = [
 ]
 
 // ─── BACKGROUND IMAGES ──────────────────────────────────────────────────────────
-const BG_WORK  = '/BG_WORK.png'
-const BG_BREAK = '/BG_BREAK.png'
-const BG_NIGHT = '/BG_NIGHT.png'
+const BG_LIGHT_WORK  = '/light_mode_work.png'
+const BG_LIGHT_BREAK = '/light_mode_break.png'
+const BG_DARK_WORK   = '/dark_mode_work.png'
+const BG_DARK_BREAK  = '/dark_mode_break.png'
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 const fmtTime = (s) =>
@@ -433,6 +434,12 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState(null)
   const [focusMode, setFocusMode] = useState(false)
 
+  // ── SOUNDCLOUD PLAYER ──
+  const scWidget = useRef(null)
+  const scIframe = useRef(null)
+  const [scPlaying, setScPlaying] = useState(false)
+  const [scReady, setScReady] = useState(false)
+
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem('pom_theme_dark')
@@ -441,10 +448,12 @@ export default function App() {
   const bgColor = isDark ? '#0a0a0a' : 'transparent'
   const accentColor = isDark ? '#1a1a1a' : bgColor
   const currentBgImage = isDark
-    ? BG_NIGHT
+    ? (timerMode === 'shortBreak' || timerMode === 'longBreak'
+        ? BG_DARK_BREAK
+        : BG_DARK_WORK)
     : (timerMode === 'shortBreak' || timerMode === 'longBreak'
-        ? BG_BREAK
-        : BG_WORK)
+        ? BG_LIGHT_BREAK
+        : BG_LIGHT_WORK)
   const meshOpacity = isDark ? 0 : 1
   const textMain = '#fff'
   const textDim = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.7)'
@@ -494,6 +503,17 @@ export default function App() {
       session_date: new Date().toISOString().split('T')[0],
     })
     showToast('Stats synced to cloud ☁️')
+  }
+
+  const toggleScPlay = () => {
+    if (!scWidget.current) return
+    if (scPlaying) scWidget.current.pause()
+    else scWidget.current.play()
+  }
+
+  const scNext = () => {
+    if (!scWidget.current) return
+    scWidget.current.next()
   }
 
   const loadLeaderboard = async () => {
@@ -1035,6 +1055,7 @@ export default function App() {
       html, body { overflow: hidden !important; height: 100% !important; }
       #root { height: 100% !important; overflow: hidden !important; }
             .timer-card-wrap { transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important; opacity: 1 !important; }
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       @media (max-width: 767px) {
     .timer-grid { grid-template-columns: 1fr !important; }
     .sw-grid { grid-template-columns: 1fr !important; }
@@ -1048,15 +1069,50 @@ export default function App() {
     return () => document.head.removeChild(s)
   }, [])
 
+  useEffect(() => {
+    // Load SoundCloud Widget API script dynamically
+    const existingScript = document.getElementById('sc-widget-api')
+    if (existingScript) {
+      initSCWidget()
+      return
+    }
+    const script = document.createElement('script')
+    script.id = 'sc-widget-api'
+    script.src = 'https://w.soundcloud.com/player/api.js'
+    script.async = true
+    script.onload = () => initSCWidget()
+    document.head.appendChild(script)
+
+    function initSCWidget() {
+      setTimeout(() => {
+        const iframe = document.getElementById('sc-iframe')
+        if (!iframe || !window.SC || !window.SC.Widget) return
+        scWidget.current = window.SC.Widget(iframe)
+        scWidget.current.bind(window.SC.Widget.Events.READY, () => {
+          setScReady(true)
+        })
+        scWidget.current.bind(window.SC.Widget.Events.PLAY, () => {
+          setScPlaying(true)
+        })
+        scWidget.current.bind(window.SC.Widget.Events.PAUSE, () => {
+          setScPlaying(false)
+        })
+        scWidget.current.bind(window.SC.Widget.Events.FINISH, () => {
+          setScPlaying(false)
+        })
+      }, 1500)
+    }
+  }, [])
+
   
   // ─── TIMER CARD ──────────────────────────────────────────────────────────────
   const TimerCard = ({ timer, count }) => {
     const isLarge  = count === 1
     const isMed    = count === 2
     const isSmallGrid = count >= 3
-    const digitPx  = isMobile ? 76 : isLarge ? 121 : isMed ? 96 : 84
-    const padV     = isLarge ? 12 : isMed ? 10 : 10
-    const padH     = isLarge ? 24 : isMed ? 20 : 14
+    const digitPx  = isMobile ? 58 : isLarge ? 88 : isMed ? 76 : 62
+    const padV     = isLarge ? 10 : isMed ? 8 : 10
+    const padH     = isLarge ? 16 : isMed ? 14 : 10
 
     const modeColor = {
       pomodoro:   '#BA4949',
@@ -1225,12 +1281,16 @@ export default function App() {
         <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            justifyContent: 'center',
+            gap: 6,
             marginTop: 0,
             marginBottom: 0,
             width: '100%',
-            justifyContent: 'center',
+            boxSizing: 'border-box',
+            paddingLeft: 8,
             paddingRight: 8,
+            overflow: 'visible',
+            flexWrap: 'nowrap',
           }}>
           <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.max(60,timer.secsLeft-60))}
             style={{
@@ -1252,7 +1312,19 @@ export default function App() {
             disabled={timer.running}>−</button>
 
           <div style={{ textAlign:'center' }}>
-            <div style={{ fontSize:digitPx, fontWeight:300, color:'#fff', letterSpacing:-2, lineHeight:1, userSelect:'none', fontVariantNumeric:'tabular-nums', animation: timer.running?'none':'none', fontFamily: "'Outfit', sans-serif" }}>
+            <div style={{
+    fontSize: digitPx,
+    fontWeight: 300,
+    color: '#fff',
+    letterSpacing: -2,
+    lineHeight: 1,
+    userSelect: 'none',
+    fontVariantNumeric: 'tabular-nums',
+    fontFamily: "'Outfit', sans-serif",
+    whiteSpace: 'nowrap',
+    flexShrink: 1,
+    minWidth: 0,
+  }}>
               {fmtTime(timer.secsLeft)}
             </div>
           </div>
@@ -1467,7 +1539,7 @@ export default function App() {
       left: 0,
     }}>
       {/* Background image layers with smooth crossfade */}
-      {[BG_WORK, BG_BREAK, BG_NIGHT].map(img => (
+      {[BG_LIGHT_WORK, BG_LIGHT_BREAK, BG_DARK_WORK, BG_DARK_BREAK].map(img => (
         <div
           key={img}
           style={{
@@ -1521,7 +1593,7 @@ export default function App() {
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <span style={{
     fontFamily: "'Caveat', cursive",
-    fontSize: 28,
+    fontSize: 31,
     fontWeight: 700,
     color: '#fff',
     userSelect: 'none',
@@ -1546,36 +1618,48 @@ export default function App() {
                 borderRadius: '50%',
                 border: '1px solid rgba(255,255,255,0.2)',
                 background: 'rgba(255,255,255,0.1)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
                 color: '#fff',
-                fontSize: 17,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-              }}>
-              {isDark ? '☀️' : '🌙'}
-            </button>
-            <button
-              onClick={() => setFocusMode(f => !f)}
-              title="Focus Mode — show only the running timer"
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: '50%',
-                border: '1px solid rgba(255,255,255,0.2)',
-                background: focusMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
-                color: '#fff',
-                fontSize: 16,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.2)'
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'
               }}>
-              ⛶
+              {isDark ? (
+                /* Sun icon — shown in dark mode to switch to light */
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="rgba(255,255,255,0.9)" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="4"/>
+                  <line x1="12" y1="2" x2="12" y2="4"/>
+                  <line x1="12" y1="20" x2="12" y2="22"/>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                  <line x1="2" y1="12" x2="4" y2="12"/>
+                  <line x1="20" y1="12" x2="22" y2="12"/>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+              ) : (
+                /* Moon icon — shown in light mode to switch to dark */
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                  stroke="rgba(255,255,255,0.9)" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+              )}
             </button>
-            {[
+                        {[
               { icon:'🖥', tip:'Color Wash Mode', fn: openWashMode },
               { icon:'?', tip:'Keyboard Shortcuts', fn:()=>setShowKeyHelp(true) },
             ].map(b => (
@@ -1660,12 +1744,12 @@ export default function App() {
             {/* Timer grid */}
             <div className="timer-grid" style={{
               display: 'grid',
-              gridTemplateColumns: timers.length === 1 ? '1fr' : '1fr 1fr',
+              gridTemplateColumns: '1fr 1fr',
               gridTemplateRows: timers.length >= 3 ? '1fr 1fr' : '1fr',
               gap: 10,
               flex: 1,
               width: '100%',
-              maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 720 : 940,
+              maxWidth: timers.length === 1 ? 720 : timers.length === 2 ? 720 : 720,
               margin: '0 auto',
               alignItems: 'stretch',
               alignContent: timers.length <= 2 ? 'center' : 'stretch',
@@ -1674,19 +1758,27 @@ export default function App() {
               padding: '0 4px',
               boxSizing: 'border-box',
               height: timers.length <= 2 ? 'auto' : '100%',
-              maxHeight: timers.length === 1 ? '82vh' : timers.length === 2 ? '80vh' : '100%',
+              maxHeight: timers.length === 1 ? '63vh' : timers.length === 2 ? '61vh' : '100%',
               minHeight: 0,
             }}>
               {(timers || []).map((t, idx) => (
                 <div key={t.id} style={{
-                  gridColumn: timers.length === 3 && idx === 2 ? '1 / -1' : 'auto',
+                  gridColumn: timers.length === 1
+    ? '1 / -1'
+    : timers.length === 3 && idx === 2
+      ? '1 / -1'
+      : 'auto',
                   display: 'flex',
                   justifyContent: 'center',
                   width: '100%',
                   minHeight: 0,
                 }}>
                   <div style={{
-                    width: timers.length === 3 && idx === 2 ? '50%' : '100%',
+                    width: timers.length === 1
+    ? '50%'
+    : timers.length === 3 && idx === 2
+      ? '50%'
+      : '100%',
                     display: 'flex',
                     flexDirection: 'column',
                     minHeight: 0,
@@ -2343,38 +2435,173 @@ export default function App() {
   })()}
       </div>
 
-      {/* SoundCloud Music Player */}
-  <div
-    className="yt-player"
-    style={{
-      position: 'fixed',
-      bottom: 20,
-      left: 20,
-      zIndex: 500,
-      borderRadius: 12,
-      overflow: 'hidden',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-      border: '1px solid rgba(255,255,255,0.18)',
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
-      width: 252,
-      opacity: 0.93,
-      transition: 'opacity 0.2s ease',
-    }}
-    onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-    onMouseLeave={e => e.currentTarget.style.opacity = '0.93'}
-  >
-    <iframe
-      title="Pomodoros.io Focus Music"
-      width="252"
-      height="137"
-      scrolling="no"
-      frameBorder="no"
-      allow="autoplay; encrypted-media"
-      src="https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/playlists/soundcloud%253Aplaylists%253A2252642798&color=%23ff5500&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=true"
-      style={{ display: 'block' }}
-    />
-  </div>
+      {/* SoundCloud Music Player — hidden iframe + custom glass UI */}
+        {/* Hidden SoundCloud iframe — loads in background */}
+        <iframe
+          id="sc-iframe"
+          title="SC"
+          width="1"
+          height="1"
+          scrolling="no"
+          frameBorder="no"
+          allow="autoplay; encrypted-media"
+          src="https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/playlists/soundcloud%253Aplaylists%253A2252642798&color=%23ff5500&auto_play=false&hide_related=true&show_comments=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+          style={{
+            position: 'fixed',
+            bottom: -100,
+            left: -100,
+            opacity: 0,
+            pointerEvents: 'none',
+            zIndex: -1,
+            width: 1,
+            height: 1,
+          }}
+        />
+
+        
+        {/* Custom glass player UI */}
+        <div
+          className="yt-player"
+          style={{
+            position: 'fixed',
+            bottom: 20,
+            left: 20,
+            zIndex: 500,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            background: 'rgba(255,255,255,0.1)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 50,
+            padding: '8px 16px 8px 8px',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+            opacity: 0.9,
+            transition: 'opacity 0.2s ease',
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
+        >
+          {/* Album art */}
+          <div style={{
+            width: 36,
+            height: 36,
+            borderRadius: '50%',
+            overflow: 'hidden',
+            flexShrink: 0,
+            border: '1px solid rgba(255,255,255,0.3)',
+            background: 'rgba(255,255,255,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            <div style={{
+              fontSize: 16,
+              animation: scPlaying ? 'spin 3s linear infinite' : 'none',
+            }}>🎵</div>
+          </div>
+
+          {/* Label */}
+          <div style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'rgba(255,255,255,0.8)',
+            letterSpacing: 0.5,
+            fontFamily: "'Outfit', sans-serif",
+            whiteSpace: 'nowrap',
+          }}>
+            {scPlaying ? 'Now Playing' : 'Play Music'}
+          </div>
+
+          {/* Play/Pause button */}
+          <button
+            onClick={toggleScPlay}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.35)',
+              background: scPlaying ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.15)',
+              color: '#fff',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.35)'}
+            onMouseLeave={e => e.currentTarget.style.background = scPlaying ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.15)'}
+          >
+            {scPlaying ? '⏸' : '▶'}
+          </button>
+          <button
+            onClick={scNext}
+            title="Next track"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.25)',
+              background: 'rgba(255,255,255,0.1)',
+              color: '#fff',
+              fontSize: 11,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.25)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+          >
+            ⏭
+          </button>
+        </div>
+
+      {/* Focus Mode Button — bottom right */}
+      <button
+        onClick={() => setFocusMode(f => !f)}
+        title="Focus Mode"
+        style={{
+          position: 'fixed',
+          bottom: 20,
+          right: 20,
+          zIndex: 500,
+          width: 44,
+          height: 44,
+          borderRadius: '50%',
+          border: '1px solid rgba(255,255,255,0.25)',
+          background: focusMode
+            ? 'rgba(255,255,255,0.28)'
+            : 'rgba(255,255,255,0.12)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          color: '#fff',
+          fontSize: 18,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          transition: 'all 0.2s ease',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.32)'
+          e.currentTarget.style.transform = 'scale(1.08)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = focusMode
+            ? 'rgba(255,255,255,0.28)'
+            : 'rgba(255,255,255,0.12)'
+          e.currentTarget.style.transform = 'scale(1)'
+        }}
+      >
+        ⛶
+      </button>
     </div>
   )
 }
