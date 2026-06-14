@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabase'
 
 // ─── SVG RING COMPONENT ───────────────────────────────────────────────────────────
@@ -298,6 +298,387 @@ const ls = {
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} },
 }
 
+// ─── STOPWATCH CARD ──────────────────────────────────────────────────────────
+function SWCard({ sw, count, bgColor, removeSW, toggleSW, lapSW, resetSW }) {
+  const isLarge = count === 1
+  return (
+    <div style={{ background:'rgba(255,255,255,0.08)', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', border:'1px solid rgba(255,255,255,0.18)', borderTop:'1px solid rgba(255,255,255,0.3)', borderRadius:24, boxShadow:'0 8px 32px rgba(0,0,0,0.25)', padding: isLarge?'32px 40px':'20px 24px', display:'flex', flexDirection:'column', alignItems:'center', position:'relative' }}>
+      {count > 1 && (
+        <button onClick={() => removeSW(sw.id)} style={{ position:'absolute', top:8, right:10, background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:20 }}
+          onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.4)'}>×</button>
+      )}
+      <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.7)', letterSpacing:1.5, textTransform:'uppercase', marginBottom:10 }}>{sw.name}</div>
+      <div style={{ fontSize: isLarge?110:70, fontWeight:700, color:'#fff', letterSpacing:-4, lineHeight:1, fontVariantNumeric:'tabular-nums', marginBottom:8 }}>{fmtHMS(sw.elapsed)}</div>
+      <div style={{ fontSize:10, fontWeight:600, letterSpacing:2, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', marginBottom:14 }}>
+        {sw.running ? 'COUNTING' : sw.elapsed > 0 ? 'PAUSED' : 'READY'}
+      </div>
+      {sw.laps.slice(-4).map(l => (
+        <div key={l.n} style={{ display:'flex', justifyContent:'space-between', width:'100%', maxWidth:260, fontSize:11, color:'rgba(255,255,255,0.55)', padding:'3px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', fontFamily:'monospace' }}>
+          <span>Lap {l.n}</span><span>+{fmtHMS(l.split)}</span><span style={{opacity:.6}}>{fmtHMS(l.total)}</span>
+        </div>
+      ))}
+      <div style={{ display:'flex', gap:8, marginTop:14 }}>
+        <button onClick={() => toggleSW(sw.id)} style={{ background:'#fff', color:bgColor, border:'none', padding:'13px 40px', borderRadius:4, fontSize:15, fontWeight:900, letterSpacing:2 }}
+          onMouseEnter={e=>e.currentTarget.style.opacity='.88'} onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
+          {sw.running ? 'STOP' : 'START'}
+        </button>
+        <button onClick={() => lapSW(sw.id)} disabled={!sw.running} style={{ background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.2)', color:sw.running?'#fff':'rgba(255,255,255,0.3)', padding:'13px 18px', borderRadius:4, fontSize:13, fontWeight:700, opacity:sw.running?1:.5 }}>Lap</button>
+        <button onClick={() => resetSW(sw.id)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', padding:'13px 12px', fontSize:13 }}
+          onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.5)'}>↺</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── TIMER CARD ──────────────────────────────────────────────────────────────
+function TimerCard({
+  timer, count, isMobile, isDark, bgColor, surfBg, borderCol,
+  settings, editingId, editName, setEditingId, setEditName,
+  updateTimerField, adjustTimer, toggleTimer, resetTimer,
+  changeTimerPhase, setTimerMode, setTasks, removeTimer, setTimers,
+}) {
+  const isLarge  = count === 1
+  const isMed    = count === 2
+  const isSmallGrid = count >= 3
+  const digitPx  = isMobile ? 48 : isLarge ? 72 : isMed ? 60 : 48
+  const padV     = isLarge ? 10 : isMed ? 8 : 10
+  const padH     = isLarge ? 16 : isMed ? 14 : 10
+
+  const modeColor = {
+    pomodoro:   '#BA4949',
+    shortBreak: '#38858A',
+    longBreak:  '#397097',
+  }[timer.mode]
+
+  return (
+    <div className="timer-card-wrap" style={{
+  background: 'rgba(255,255,255,0.08)',
+  backdropFilter: 'blur(20px)',
+  WebkitBackdropFilter: 'blur(20px)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  borderTop: '1px solid rgba(255,255,255,0.3)',
+  borderRadius: 24,
+  boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+  padding: `${padV}px ${padH}px`,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 0,
+  position: 'relative',
+  width: '100%',
+  height: '100%',
+  boxSizing: 'border-box',
+  minHeight: 0,
+}}>
+      {/* Delete button */}
+      {count > 1 && (
+        <button onClick={() => removeTimer(timer.id)}
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 10,
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            color: 'rgba(255,255,255,0.5)',
+            fontSize: 14,
+            lineHeight: 1,
+            padding: '2px 7px',
+            borderRadius: 20,
+            cursor: 'pointer',
+            zIndex: 2,
+          }}
+          onMouseEnter={e => e.currentTarget.style.color='#fff'}
+          onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.5)'}>
+          ×
+        </button>
+      )}
+
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:16, paddingTop: isLarge ? 18 : isMed ? 14 : 10 }}>
+      {/* Name - editable */}
+      {editingId === timer.id ? (
+        <input
+          value={editName}
+          onChange={e => setEditName(e.target.value)}
+          onBlur={() => {
+  const trimmed = (editName || timer.name || '').trim()
+  if (trimmed) {
+    updateTimerField(timer.id, 'name', trimmed)
+    updateTimerField(timer.id, 'task', trimmed)
+    setTasks(prev => {
+      const exists = prev.find(t => t.timerRef === timer.id)
+      if (exists) {
+        return prev.map(t => t.timerRef === timer.id ? { ...t, name: trimmed } : t)
+      }
+      return [...prev, { id: Date.now(), name: trimmed, estimatedPomodoros: 1, completedPomodoros: 0, done: false, timerRef: timer.id }]
+    })
+  }
+  setEditingId(null)
+}}
+          onKeyDown={e => {
+  if (e.key === 'Enter' || e.key === 'Escape') {
+    const trimmed = (editName || timer.name || '').trim()
+    if (trimmed) {
+      updateTimerField(timer.id, 'name', trimmed)
+      updateTimerField(timer.id, 'task', trimmed)
+      setTasks(prev => {
+        const exists = prev.find(t => t.timerRef === timer.id)
+        if (exists) {
+          return prev.map(t => t.timerRef === timer.id ? { ...t, name: trimmed } : t)
+        }
+        return [...prev, { id: Date.now(), name: trimmed, estimatedPomodoros: 1, completedPomodoros: 0, done: false, timerRef: timer.id }]
+      })
+    }
+    setEditingId(null)
+  }
+}}
+          autoFocus
+          style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, textAlign:'center', letterSpacing:1, width:160 }}
+        />
+      ) : (
+        <div
+          onClick={() => { setEditingId(timer.id); setEditName(timer.name) }}
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: 'rgba(255,255,255,0.75)',
+            letterSpacing: 1.5,
+            textTransform: 'uppercase',
+            cursor: 'pointer',
+            padding: '4px 14px',
+            borderRadius: 20,
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            textAlign: 'center',
+            maxWidth: 180,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.12)'}
+          onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.08)'}>
+          {timer.name}
+        </div>
+      )}
+
+      {/* Task line */}
+      
+      {/* Mode tabs - per timer */}
+      <div style={{ display:'flex', gap:8 }}>
+        <button
+          onClick={() => { changeTimerPhase(timer.id, 'pomodoro'); setTimerMode('pomodoro') }}
+          style={{
+            padding: '6px 20px',
+            borderRadius: 100,
+            border: timer.mode === 'pomodoro'
+              ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
+              : 'none',
+            background: timer.mode === 'pomodoro'
+              ? 'rgba(255,255,255,0.28)'
+              : 'rgba(255,255,255,0.08)',
+            color: '#fff',
+            fontSize: 'clamp(10px, 1vw, 13px)',
+            fontWeight: 700,
+            letterSpacing: 0.5,
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.15)',
+          }}>
+          Work
+        </button>
+        <button
+          onClick={() => { changeTimerPhase(timer.id, 'shortBreak'); setTimerMode('shortBreak') }}
+          style={{
+            padding: '6px 20px',
+            borderRadius: 100,
+            border: timer.mode !== 'pomodoro'
+              ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
+              : 'none',
+            background: timer.mode !== 'pomodoro'
+              ? 'rgba(255,255,255,0.28)'
+              : 'rgba(255,255,255,0.08)',
+            color: '#fff',
+            fontSize: 'clamp(10px, 1vw, 13px)',
+            fontWeight: 700,
+            letterSpacing: 0.5,
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.15)',
+          }}>
+          Break
+        </button>
+      </div>
+      </div>
+
+      
+      {/* Countdown */}
+      <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          marginTop: 0,
+          marginBottom: 0,
+          width: '100%',
+          boxSizing: 'border-box',
+          paddingLeft: 6,
+          paddingRight: 6,
+          overflow: 'visible',
+          flexWrap: 'nowrap',
+        }}>
+        <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.max(60,timer.secsLeft-60))}
+          style={{
+  background: 'rgba(0,0,0,0.2)',
+  border: '1px solid rgba(255,255,255,0.2)',
+  color: 'rgba(255,255,255,0.6)',
+  width: 28,
+  height: 28,
+  borderRadius: '50%',
+  fontSize: 16,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+  lineHeight: 1,
+  padding: 0,
+  cursor: 'pointer',
+}}
+          disabled={timer.running}>−</button>
+
+        <div style={{ textAlign:'center' }}>
+          <div style={{
+  fontSize: isLarge
+    ? 'clamp(48px, 8vw, 110px)'
+    : isMed
+      ? 'clamp(40px, 6vw, 88px)'
+      : 'clamp(36px, 5vw, 72px)',
+  fontWeight: 300,
+  color: '#fff',
+  letterSpacing: -2,
+  lineHeight: 1,
+  userSelect: 'none',
+  fontVariantNumeric: 'tabular-nums',
+  fontFamily: "'Outfit', sans-serif",
+  whiteSpace: 'nowrap',
+  flexShrink: 1,
+  minWidth: 0,
+}}>
+            {fmtTime(timer.secsLeft)}
+          </div>
+        </div>
+
+        <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.min(3600,timer.secsLeft+60))}
+          style={{
+  background: 'rgba(0,0,0,0.2)',
+  border: '1px solid rgba(255,255,255,0.2)',
+  color: 'rgba(255,255,255,0.6)',
+  width: 28,
+  height: 28,
+  borderRadius: '50%',
+  fontSize: 16,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+  lineHeight: 1,
+  padding: 0,
+  cursor: 'pointer',
+}}
+          disabled={timer.running}>+</button>
+      </div>
+
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14, paddingBottom: isLarge ? 18 : isMed ? 14 : 10 }}>
+      <div style={{
+  display: 'flex',
+  gap: 8,
+  justifyContent: 'center',
+  width: '100%',
+}}>
+  <button
+    onClick={() => toggleTimer(timer.id)}
+    style={{
+  padding: isLarge ? '10px 32px' : isMed ? '8px 24px' : '7px 18px',
+  borderRadius: 100,
+  border: '1px solid rgba(255,255,255,0.55)',
+  background: 'rgba(255,255,255,0.22)',
+  backdropFilter: 'blur(12px)',
+  WebkitBackdropFilter: 'blur(12px)',
+  color: '#fff',
+  fontSize: 'clamp(10px, 1.2vw, 14px)',
+  fontWeight: 700,
+  letterSpacing: 2,
+  cursor: 'pointer',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 12px rgba(0,0,0,0.2)',
+  flexShrink: 0,
+  transition: 'all 0.15s ease',
+  fontFamily: "'Outfit', sans-serif",
+}}
+    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.32)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.75)' }}
+    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.55)' }}>
+    {timer.running ? 'PAUSE' : 'START'}
+  </button>
+  <button
+    onClick={() => resetTimer(timer.id)}
+    style={{
+  padding: isLarge ? '10px 32px' : isMed ? '8px 24px' : '7px 18px',
+  borderRadius: 100,
+  border: '1px solid rgba(255,255,255,0.3)',
+  background: 'rgba(255,255,255,0.12)',
+  color: '#fff',
+  fontSize: 'clamp(10px, 1.2vw, 14px)',
+  fontWeight: 700,
+  letterSpacing: 1,
+  cursor: 'pointer',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(0,0,0,0.1)',
+  flexShrink: 0,
+  transition: 'all 0.15s ease',
+}}
+    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.45)' }}
+    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)' }}>
+    ↺ RESET
+  </button>
+</div>
+
+      {/* Preset pills */}
+      <div style={{ display:'flex', gap:6, marginTop:0, marginBottom:0 }}>
+        {[{label:'25/5',work:25,brk:5},{label:'30/10',work:30,brk:10},{label:'45/15',work:45,brk:15}].map(p => {
+          const active = timer.mode === 'pomodoro'
+            ? Math.round((timer.totalSecs || timer.secsLeft) / 60) === p.work
+            : Math.round((timer.totalSecs || timer.secsLeft) / 60) === p.brk
+          return (
+            <button
+              key={p.label}
+              disabled={timer.running}
+              onClick={() => {
+                const secs = timer.mode === 'pomodoro' ? p.work * 60 : p.brk * 60
+                setTimers(prev => prev.map(t => t.id === timer.id ? {
+                  ...t,
+                  secsLeft: secs,
+                  totalSecs: secs,
+                  workMin: p.work,
+                  breakMin: p.brk,
+                } : t))
+              }}
+              style={{
+                padding: '3px 11px',
+                borderRadius: 100,
+                border: `1px solid ${active ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)'}`,
+                background: active ? 'rgba(255,255,255,0.18)' : 'transparent',
+                color: active ? '#fff' : 'rgba(255,255,255,0.5)',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: timer.running ? 'not-allowed' : 'pointer',
+                opacity: timer.running ? 0.35 : 1,
+                transition: 'all 0.2s ease',
+                letterSpacing: 0.3,
+              }}>
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
+      </div>
+
+            </div>
+  )
+}
+
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function App() {
 
@@ -431,6 +812,7 @@ export default function App() {
   const [showOnboard, setShowOnboard] = useState(() => !ls.get('pom_visited', false))
   const [onboardStep, setOnboardStep] = useState(1)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  const [vw, setVw] = useState(window.innerWidth)
   const [installPrompt, setInstallPrompt] = useState(null)
   const [focusMode, setFocusMode] = useState(false)
 
@@ -690,8 +1072,7 @@ export default function App() {
         const isPomodoro = t.mode === 'pomodoro'
         const newCycles = isPomodoro ? t.cyclesDone + 1 : t.cyclesDone
         confetti()
-        showToast(isPomodoro ? `🍅 ${t.name} complete! Take a break.` : `⚡ Break over — back to focus!`)
-        setTimerMode(nextMode === 'pomodoro' ? 'pomodoro' : 'shortBreak')
+        showToast(isPomodoro ? `🍅 ${t.name} complete! Take a break.` : `⚡ Break over - back to focus!`)
         // determine next mode
         let nextMode
         if (isPomodoro) {
@@ -699,6 +1080,7 @@ export default function App() {
         } else {
           nextMode = 'pomodoro'
         }
+        setTimerMode(nextMode === 'pomodoro' ? 'pomodoro' : 'shortBreak')
         const timerWorkMin = t.workMin || settings.pomodoroMin
         const timerBreakMin = t.breakMin || settings.shortBreakMin
         const nextSecs = nextMode === 'pomodoro'
@@ -710,6 +1092,7 @@ export default function App() {
           mode: nextMode,
           secsLeft: nextSecs,
           cyclesDone: newCycles,
+          totalSecs: nextSecs,
           totalFocusSecs: isPomodoro ? t.totalFocusSecs + 1 : t.totalFocusSecs,
           totalBreakSecs: !isPomodoro ? t.totalBreakSecs + 1 : t.totalBreakSecs,
         }
@@ -833,9 +1216,9 @@ export default function App() {
 
   // ─── RESIZE ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < 768)
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    const h = () => { setIsMobile(window.innerWidth < 768); setVw(window.innerWidth) }
+    window.addEventListener('resize', h)
+    return () => window.removeEventListener('resize', h)
   }, [])
 
   // ─── PWA ─────────────────────────────────────────────────────────────────────
@@ -971,7 +1354,7 @@ export default function App() {
       const secs = t.mode === 'pomodoro' ? tempSettings.pomodoroMin * 60
         : t.mode === 'shortBreak' ? tempSettings.shortBreakMin * 60
         : tempSettings.longBreakMin * 60
-      return { ...t, secsLeft: secs }
+      return { ...t, secsLeft: secs, totalSecs: secs }
     }))
     setShowSettings(false)
     showToast('Settings saved')
@@ -1031,40 +1414,85 @@ export default function App() {
     const s = document.createElement('style')
     s.id = 'pom-global'
     s.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
-      *, *::before, *::after { box-sizing: border-box; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
-      *::-webkit-scrollbar { width: 4px; } *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
-      body, html { margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; background: #0f172a; }
-      button { cursor: pointer; font-family: inherit; transition: all .2s cubic-bezier(0.23,1,0.32,1); }
-      button:focus, input:focus, textarea:focus { outline: none; }
-      @keyframes cfall { 0%{transform:translateY(0) rotate(0);opacity:1} 100%{transform:translateY(105vh) rotate(540deg);opacity:0} }
-      @keyframes fadeUp { from{opacity:0;transform:translateX(-50%) translateY(10px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
-      @keyframes meshFloat { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-20px) scale(1.05)} }
-      .start-btn:hover { transform: translateY(-3px) scale(1.03) !important; box-shadow: 0 15px 40px rgba(0,0,0,0.4) !important; }
-      .tab-btn:hover { background: rgba(255,255,255,0.08) !important; color: #f8fafc !important; }
-      .task-row:hover { border-color: rgba(255,255,255,0.12) !important; background: rgba(255,255,255,0.05) !important; }
-      .icon-btn:hover { background: rgba(255,255,255,0.12) !important; transform: translateY(-2px); }
-      .adj-btn:hover { background: rgba(255,255,255,0.1) !important; border-color: rgba(255,255,255,0.3) !important; }
-      .timer-grid { transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1) !important; }
-            .sw-grid    { transition: all 0.45s cubic-bezier(0.23,1,0.32,1) !important; }
-      .preset-btn:hover { border-color: #10b981 !important; color: #10b981 !important; background: rgba(16,185,129,0.08) !important; }
-      .work-btn:hover  { box-shadow: 0 0 20px rgba(16,185,129,0.3) !important; }
-      .break-btn:hover { box-shadow: 0 0 20px rgba(59,130,246,0.3) !important; }
-      input::placeholder { color: #334155 !important; }
-      textarea::placeholder { color: #334155 !important; }
-      html, body { overflow: hidden !important; height: 100% !important; }
-      #root { height: 100% !important; overflow: hidden !important; }
-            .timer-card-wrap { transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important; opacity: 1 !important; }
-      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      @media (max-width: 767px) {
-    .timer-grid { grid-template-columns: 1fr !important; }
-    .sw-grid { grid-template-columns: 1fr !important; }
-  }
-  @media (max-width: 480px) {
-    .timer-grid { padding: 0 4px !important; gap: 8px !important; }
-    .yt-player { display: none !important; }
-  }
-    `
+    @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0f172a; }
+    #root { width: 100%; height: 100%; overflow: hidden; }
+    *::-webkit-scrollbar { width: 3px; height: 3px; }
+    *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    button { cursor: pointer; font-family: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    button:focus, input:focus, textarea:focus { outline: none; }
+    input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.3) !important; }
+
+    @keyframes cfall { 0%{transform:translateY(0) rotate(0);opacity:1} 100%{transform:translateY(105vh) rotate(540deg);opacity:0} }
+    @keyframes fadeUp { from{opacity:0;transform:translateX(-50%) translateY(8px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+    @keyframes fadeInScale { from{opacity:0;transform:scale(0.96)} to{opacity:1;transform:scale(1)} }
+    @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+    .timer-card-wrap { transition: box-shadow 0.3s ease, border-color 0.3s ease; }
+    .timer-grid { transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1) !important; }
+    .sw-grid { transition: all 0.45s cubic-bezier(0.23,1,0.32,1) !important; }
+
+    .start-btn:hover { opacity: 0.88; }
+    .tab-btn:hover { background: rgba(255,255,255,0.12) !important; color: #fff !important; }
+    .icon-btn:hover { background: rgba(255,255,255,0.18) !important; }
+    .adj-btn:hover { background: rgba(255,255,255,0.15) !important; }
+    .preset-btn:hover { border-color: rgba(255,255,255,0.5) !important; color: #fff !important; }
+    .work-btn:hover { background: rgba(255,255,255,0.35) !important; }
+    .break-btn:hover { background: rgba(255,255,255,0.35) !important; }
+    .nav-scroll::-webkit-scrollbar { display: none; }
+
+    /* ── MOBILE (phones up to 480px) ── */
+    @media (max-width: 480px) {
+      .timer-grid {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: auto !important;
+        gap: 8px !important;
+        height: auto !important;
+        overflow-y: auto !important;
+        padding: 0 8px !important;
+      }
+      .sw-grid {
+        grid-template-columns: 1fr !important;
+        max-width: 100% !important;
+      }
+      .yt-player { display: none !important; }
+      .focus-bottom-btn { bottom: 10px !important; right: 10px !important; width: 36px !important; height: 36px !important; font-size: 15px !important; }
+      .nav-tab-label { font-size: 10px !important; padding: 5px 8px !important; }
+      .header-logo { font-size: 22px !important; }
+      .maintenance-banner { font-size: 9px !important; padding: 3px 8px !important; }
+    }
+
+    /* ── TABLET (481px to 768px) ── */
+    @media (min-width: 481px) and (max-width: 768px) {
+      .timer-grid {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 8px !important;
+        padding: 0 8px !important;
+      }
+      .sw-grid { max-width: 100% !important; }
+      .yt-player { width: 220px !important; }
+      .yt-player iframe { width: 220px !important; height: 100px !important; }
+    }
+
+    /* ── LAPTOP (769px to 1280px) ── */
+    @media (min-width: 769px) and (max-width: 1280px) {
+    }
+
+    /* ── DESKTOP (1281px to 1920px) ── */
+    @media (min-width: 1281px) and (max-width: 1920px) {
+    }
+
+    /* ── TV / LARGE SCREEN (1921px+) ── */
+    @media (min-width: 1921px) {
+      .timer-grid { gap: 20px !important; }
+      .sw-grid { max-width: 1200px !important; }
+      .header-logo { font-size: 42px !important; }
+      .nav-tab-label { font-size: 16px !important; padding: 10px 20px !important; }
+    }
+  `
     document.head.appendChild(s)
     return () => document.head.removeChild(s)
   }, [])
@@ -1105,378 +1533,8 @@ export default function App() {
   }, [])
 
   
-  // ─── TIMER CARD ──────────────────────────────────────────────────────────────
-  const TimerCard = ({ timer, count }) => {
-    const isLarge  = count === 1
-    const isMed    = count === 2
-    const isSmallGrid = count >= 3
-    const digitPx  = isMobile ? 58 : isLarge ? 88 : isMed ? 76 : 62
-    const padV     = isLarge ? 10 : isMed ? 8 : 10
-    const padH     = isLarge ? 16 : isMed ? 14 : 10
-
-    const modeColor = {
-      pomodoro:   '#BA4949',
-      shortBreak: '#38858A',
-      longBreak:  '#397097',
-    }[timer.mode]
-
-    return (
-      <div className="timer-card-wrap" style={{
-    background: 'rgba(255,255,255,0.08)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255,255,255,0.18)',
-    borderTop: '1px solid rgba(255,255,255,0.3)',
-    borderRadius: 24,
-    boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-    padding: `${padV}px ${padH}px`,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 0,
-    position: 'relative',
-    width: '100%',
-    height: '100%',
-    boxSizing: 'border-box',
-    minHeight: 0,
-  }}>
-        {/* Delete button */}
-        {count > 1 && (
-          <button onClick={() => removeTimer(timer.id)}
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 10,
-              background: 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              color: 'rgba(255,255,255,0.5)',
-              fontSize: 14,
-              lineHeight: 1,
-              padding: '2px 7px',
-              borderRadius: 20,
-              cursor: 'pointer',
-              zIndex: 2,
-            }}
-            onMouseEnter={e => e.currentTarget.style.color='#fff'}
-            onMouseLeave={e => e.currentTarget.style.color='rgba(255,255,255,0.5)'}>
-            ×
-          </button>
-        )}
-
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:16, paddingTop: isLarge ? 18 : isMed ? 14 : 10 }}>
-        {/* Name — editable */}
-        {editingId === timer.id ? (
-          <input
-            value={editName}
-            onChange={e => setEditName(e.target.value)}
-            onBlur={() => {
-    const trimmed = (editName || editingName || '').trim()
-    if (trimmed) {
-      updateTimerField(timer.id, 'name', trimmed)
-      updateTimerField(timer.id, 'task', trimmed)
-      setTasks(prev => {
-        const exists = prev.find(t => t.timerRef === timer.id)
-        if (exists) {
-          return prev.map(t => t.timerRef === timer.id ? { ...t, name: trimmed } : t)
-        }
-        return [...prev, { id: Date.now(), name: trimmed, estimatedPomodoros: 1, completedPomodoros: 0, done: false, timerRef: timer.id }]
-      })
-    }
-    setEditingId(null)
-  }}
-            onKeyDown={e => {
-    if (e.key === 'Enter' || e.key === 'Escape') {
-      const trimmed = (editName || editingName || '').trim()
-      if (trimmed) {
-        updateTimerField(timer.id, 'name', trimmed)
-        updateTimerField(timer.id, 'task', trimmed)
-        setTasks(prev => {
-          const exists = prev.find(t => t.timerRef === timer.id)
-          if (exists) {
-            return prev.map(t => t.timerRef === timer.id ? { ...t, name: trimmed } : t)
-          }
-          return [...prev, { id: Date.now(), name: trimmed, estimatedPomodoros: 1, completedPomodoros: 0, done: false, timerRef: timer.id }]
-        })
-      }
-      setEditingId(null)
-    }
-  }}
-            autoFocus
-            style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, textAlign:'center', letterSpacing:1, width:160 }}
-          />
-        ) : (
-          <div
-            onClick={() => { setEditingId(timer.id); setEditName(timer.name) }}
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'rgba(255,255,255,0.75)',
-              letterSpacing: 1.5,
-              textTransform: 'uppercase',
-              cursor: 'pointer',
-              padding: '4px 14px',
-              borderRadius: 20,
-              background: 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              textAlign: 'center',
-              maxWidth: 180,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.12)'}
-            onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.08)'}>
-            {timer.name}
-          </div>
-        )}
-
-        {/* Task line */}
-        
-        {/* Mode tabs — per timer */}
-        <div style={{ display:'flex', gap:8 }}>
-          <button
-            onClick={() => { changeTimerPhase(timer.id, 'pomodoro'); setTimerMode('pomodoro') }}
-            style={{
-              padding: '6px 20px',
-              borderRadius: 100,
-              border: timer.mode === 'pomodoro'
-                ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
-                : 'none',
-              background: timer.mode === 'pomodoro'
-                ? 'rgba(255,255,255,0.28)'
-                : 'rgba(255,255,255,0.08)',
-              color: '#fff',
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.15)',
-            }}>
-            Work
-          </button>
-          <button
-            onClick={() => { changeTimerPhase(timer.id, 'shortBreak'); setTimerMode('shortBreak') }}
-            style={{
-              padding: '6px 20px',
-              borderRadius: 100,
-              border: timer.mode !== 'pomodoro'
-                ? (isDark ? 'none' : '1px solid rgba(255,255,255,0.55)')
-                : 'none',
-              background: timer.mode !== 'pomodoro'
-                ? 'rgba(255,255,255,0.28)'
-                : 'rgba(255,255,255,0.08)',
-              color: '#fff',
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 8px rgba(0,0,0,0.15)',
-            }}>
-            Break
-          </button>
-        </div>
-        </div>
-
-        
-        {/* Countdown */}
-        <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            marginTop: 0,
-            marginBottom: 0,
-            width: '100%',
-            boxSizing: 'border-box',
-            paddingLeft: 8,
-            paddingRight: 8,
-            overflow: 'visible',
-            flexWrap: 'nowrap',
-          }}>
-          <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.max(60,timer.secsLeft-60))}
-            style={{
-    background: 'rgba(0,0,0,0.2)',
-    border: '1px solid rgba(255,255,255,0.2)',
-    color: 'rgba(255,255,255,0.6)',
-    width: 34,
-    height: 34,
-    borderRadius: '50%',
-    fontSize: 18,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    lineHeight: 1,
-    padding: 0,
-    cursor: 'pointer',
-  }}
-            disabled={timer.running}>−</button>
-
-          <div style={{ textAlign:'center' }}>
-            <div style={{
-    fontSize: digitPx,
-    fontWeight: 300,
-    color: '#fff',
-    letterSpacing: -2,
-    lineHeight: 1,
-    userSelect: 'none',
-    fontVariantNumeric: 'tabular-nums',
-    fontFamily: "'Outfit', sans-serif",
-    whiteSpace: 'nowrap',
-    flexShrink: 1,
-    minWidth: 0,
-  }}>
-              {fmtTime(timer.secsLeft)}
-            </div>
-          </div>
-
-          <button onClick={() => !timer.running && updateTimerField(timer.id,'secsLeft',Math.min(3600,timer.secsLeft+60))}
-            style={{
-    background: 'rgba(0,0,0,0.2)',
-    border: '1px solid rgba(255,255,255,0.2)',
-    color: 'rgba(255,255,255,0.6)',
-    width: 34,
-    height: 34,
-    borderRadius: '50%',
-    fontSize: 18,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    lineHeight: 1,
-    padding: 0,
-    cursor: 'pointer',
-  }}
-            disabled={timer.running}>+</button>
-        </div>
-
-        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14, paddingBottom: isLarge ? 18 : isMed ? 14 : 10 }}>
-        <div style={{
-    display: 'flex',
-    gap: 8,
-    justifyContent: 'center',
-    width: '100%',
-  }}>
-    <button
-      onClick={() => toggleTimer(timer.id)}
-      style={{
-    padding: isLarge ? '10px 32px' : isMed ? '8px 24px' : '7px 18px',
-    borderRadius: 100,
-    border: '1px solid rgba(255,255,255,0.55)',
-    background: 'rgba(255,255,255,0.22)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    color: '#fff',
-    fontSize: isLarge ? 14 : isMed ? 12 : 11,
-    fontWeight: 700,
-    letterSpacing: 2,
-    cursor: 'pointer',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 12px rgba(0,0,0,0.2)',
-    flexShrink: 0,
-    transition: 'all 0.15s ease',
-    fontFamily: "'Outfit', sans-serif",
-  }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.32)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.75)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.55)' }}>
-      {timer.running ? 'PAUSE' : 'START'}
-    </button>
-    <button
-      onClick={() => resetTimer(timer.id)}
-      style={{
-    padding: isLarge ? '10px 32px' : isMed ? '8px 24px' : '7px 18px',
-    borderRadius: 100,
-    border: '1px solid rgba(255,255,255,0.3)',
-    background: 'rgba(255,255,255,0.12)',
-    color: '#fff',
-    fontSize: isLarge ? 14 : isMed ? 12 : 11,
-    fontWeight: 700,
-    letterSpacing: 1,
-    cursor: 'pointer',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(0,0,0,0.1)',
-    flexShrink: 0,
-    transition: 'all 0.15s ease',
-  }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.45)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)' }}>
-      ↺ RESET
-    </button>
-  </div>
-
-        {/* Preset pills */}
-        <div style={{ display:'flex', gap:6, marginTop:0, marginBottom:0 }}>
-          {[{label:'25/5',work:25,brk:5},{label:'30/10',work:30,brk:10},{label:'45/15',work:45,brk:15}].map(p => {
-            const active = timer.mode === 'pomodoro'
-              ? Math.round((timer.totalSecs || timer.secsLeft) / 60) === p.work
-              : Math.round((timer.totalSecs || timer.secsLeft) / 60) === p.brk
-            return (
-              <button
-                key={p.label}
-                disabled={timer.running}
-                onClick={() => {
-                  const secs = timer.mode === 'pomodoro' ? p.work * 60 : p.brk * 60
-                  setTimers(prev => prev.map(t => t.id === timer.id ? {
-                    ...t,
-                    secsLeft: secs,
-                    totalSecs: secs,
-                    workMin: p.work,
-                    breakMin: p.brk,
-                  } : t))
-                }}
-                style={{
-                  padding: '3px 11px',
-                  borderRadius: 100,
-                  border: `1px solid ${active ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)'}`,
-                  background: active ? 'rgba(255,255,255,0.18)' : 'transparent',
-                  color: active ? '#fff' : 'rgba(255,255,255,0.5)',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  cursor: timer.running ? 'not-allowed' : 'pointer',
-                  opacity: timer.running ? 0.35 : 1,
-                  transition: 'all 0.2s ease',
-                  letterSpacing: 0.3,
-                }}>
-                {p.label}
-              </button>
-            )
-          })}
-        </div>
-        </div>
-
-              </div>
-    )
-  }
-
-  // ─── STOPWATCH CARD ──────────────────────────────────────────────────────────
-  const SWCard = ({ sw, count }) => {
-    const isLarge = count === 1
-    return (
-      <div style={{ background:'rgba(255,255,255,0.08)', backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)', border:'1px solid rgba(255,255,255,0.18)', borderTop:'1px solid rgba(255,255,255,0.3)', borderRadius:24, boxShadow:'0 8px 32px rgba(0,0,0,0.25)', padding: isLarge?'32px 40px':'20px 24px', display:'flex', flexDirection:'column', alignItems:'center', position:'relative' }}>
-        {count > 1 && (
-          <button onClick={() => removeSW(sw.id)} style={{ position:'absolute', top:8, right:10, background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:20 }}
-            onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.4)'}>×</button>
-        )}
-        <div style={{ fontSize:11, fontWeight:700, color:'rgba(255,255,255,0.7)', letterSpacing:1.5, textTransform:'uppercase', marginBottom:10 }}>{sw.name}</div>
-        <div style={{ fontSize: isLarge?110:70, fontWeight:700, color:'#fff', letterSpacing:-4, lineHeight:1, fontVariantNumeric:'tabular-nums', marginBottom:8 }}>{fmtHMS(sw.elapsed)}</div>
-        <div style={{ fontSize:10, fontWeight:600, letterSpacing:2, color:'rgba(255,255,255,0.5)', textTransform:'uppercase', marginBottom:14 }}>
-          {sw.running ? 'COUNTING' : sw.elapsed > 0 ? 'PAUSED' : 'READY'}
-        </div>
-        {sw.laps.slice(-4).map(l => (
-          <div key={l.n} style={{ display:'flex', justifyContent:'space-between', width:'100%', maxWidth:260, fontSize:11, color:'rgba(255,255,255,0.55)', padding:'3px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', fontFamily:'monospace' }}>
-            <span>Lap {l.n}</span><span>+{fmtHMS(l.split)}</span><span style={{opacity:.6}}>{fmtHMS(l.total)}</span>
-          </div>
-        ))}
-        <div style={{ display:'flex', gap:8, marginTop:14 }}>
-          <button onClick={() => toggleSW(sw.id)} style={{ background:'#fff', color:bgColor, border:'none', padding:'13px 40px', borderRadius:4, fontSize:15, fontWeight:900, letterSpacing:2 }}
-            onMouseEnter={e=>e.currentTarget.style.opacity='.88'} onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
-            {sw.running ? 'STOP' : 'START'}
-          </button>
-          <button onClick={() => lapSW(sw.id)} disabled={!sw.running} style={{ background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.2)', color:sw.running?'#fff':'rgba(255,255,255,0.3)', padding:'13px 18px', borderRadius:4, fontSize:13, fontWeight:700, opacity:sw.running?1:.5 }}>Lap</button>
-          <button onClick={() => resetSW(sw.id)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', padding:'13px 12px', fontSize:13 }}
-            onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.5)'}>↺</button>
-        </div>
-      </div>
-    )
-  }
-
+  
+  
   // ─── HEATMAP COMPONENT ─────────────────────────────────────────────────────────
   const HeatmapGrid = () => {
     const days = []
@@ -1524,6 +1582,16 @@ export default function App() {
     )
   }
 
+  // ─── FOCUS MODE TIMERS ───────────────────────────────────────────────────────────
+  const focusModeTimers = (timers || []).filter(t => t.running).length > 0
+    ? (timers || []).filter(t => t.running)
+    : [(timers || [])[0]].filter(Boolean)
+
+  const focusModeDisplayTimer = (() => {
+    const running = (timers || []).find(t => t.running)
+    return running || timers[0] || null
+  })()
+
   // ─── RENDER ──────────────────────────────────────────────────────────────────
   return (
     <div style={{
@@ -1537,6 +1605,7 @@ export default function App() {
       position: 'fixed',
       top: 0,
       left: 0,
+      minHeight: '-webkit-fill-available',
     }}>
       {/* Background image layers with smooth crossfade */}
       {[BG_LIGHT_WORK, BG_LIGHT_BREAK, BG_DARK_WORK, BG_DARK_BREAK].map(img => (
@@ -1591,9 +1660,9 @@ export default function App() {
         <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: 'transparent', backdropFilter: 'none', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Logo */}
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <span style={{
+            <span className="header-logo" style={{
     fontFamily: "'Caveat', cursive",
-    fontSize: 31,
+    fontSize: 36,
     fontWeight: 700,
     color: '#fff',
     userSelect: 'none',
@@ -1608,7 +1677,7 @@ export default function App() {
                       </div>
 
           {/* Right buttons */}
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap: 'wrap' }}>
             <button
               onClick={() => setIsDark(d => !d)}
               title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
@@ -1636,7 +1705,7 @@ export default function App() {
                 e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'
               }}>
               {isDark ? (
-                /* Sun icon — shown in dark mode to switch to light */
+                /* Sun icon - shown in dark mode to switch to light */
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="rgba(255,255,255,0.9)" strokeWidth="2"
                   strokeLinecap="round" strokeLinejoin="round">
@@ -1651,7 +1720,7 @@ export default function App() {
                   <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
                 </svg>
               ) : (
-                /* Moon icon — shown in light mode to switch to dark */
+                /* Moon icon - shown in light mode to switch to dark */
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
                   stroke="rgba(255,255,255,0.9)" strokeWidth="2"
                   strokeLinecap="round" strokeLinejoin="round">
@@ -1681,7 +1750,7 @@ export default function App() {
         </div>
 
       {/* ══ MAINTENANCE BANNER ════════════════════════════════════════════════════════════ */}
-      <div style={{
+      <div className="maintenance-banner" style={{
         width: '100%',
         textAlign: 'center',
         padding: '5px 16px',
@@ -1694,15 +1763,33 @@ export default function App() {
         color: '#FF3B3B',
         flexShrink: 0,
       }}>
-        🚧 We are actively working on improving this site — sorry for any inconvenience caused 🚧
+        🚧 We are actively working on improving this site - sorry for any inconvenience caused 🚧
       </div>
 
       {/* ══ NAV TABS ════════════════════════════════════════════════════════════ */}
-      <div style={{ flexShrink: 0, padding: '8px 16px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto' }}>
+      <div className="nav-scroll" style={{ flexShrink: 0, padding: '6px 8px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
         <div style={{ display:'flex', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius:100, padding:5, gap:2, backdropFilter: 'blur(12px)' }}>
           {[{k:'timer',l:'Pomodoro'},{k:'sounds',l:'Sounds'},{k:'notes',l:'Notes'},{k:'stopwatch',l:'Stopwatch'},{k:'stats',l:'Report'}].map(t => (
-            <button key={t.k} className="tab-btn" onClick={()=>setTab(t.k)}
-              style={{ background:tab===t.k?'rgba(255,255,255,0.9)':'transparent', color:tab===t.k?'#1a0a2e':'rgba(255,255,255,0.75)', border:'none', padding:'6px 13px', borderRadius:100, fontSize:12, fontFamily: "'Outfit', sans-serif", fontWeight:tab===t.k?700:500, letterSpacing:.3 }}>
+            <button key={t.k} className="tab-btn nav-tab-label" onClick={()=>setTab(t.k)}
+              style={{
+                background: tab===t.k
+                  ? 'rgba(255,255,255,0.22)'
+                  : 'transparent',
+                color: tab===t.k
+                  ? '#fff'
+                  : 'rgba(255,255,255,0.6)',
+                backdropFilter: tab===t.k ? 'blur(8px)' : 'none',
+                WebkitBackdropFilter: tab===t.k ? 'blur(8px)' : 'none',
+                border: tab===t.k
+                  ? '1px solid rgba(255,255,255,0.35)'
+                  : '1px solid transparent',
+                fontWeight: tab===t.k ? 700 : 500,
+                padding:'6px 13px',
+                borderRadius:100,
+                fontSize:12,
+                fontFamily: "'Outfit', sans-serif",
+                letterSpacing:.3
+              }}>
               {t.l}
             </button>
           ))}
@@ -1737,7 +1824,7 @@ export default function App() {
             flexDirection: 'column',
             overflow: 'hidden',
             height: '100%',
-            padding: timers.length <= 2 ? '4px 24px 12px' : '4px 8px 12px',
+            padding: timers.length <= 2 ? '4px 120px 12px' : '4px 8px 12px',
             boxSizing: 'border-box',
             alignItems: 'center',
           }}>
@@ -1748,9 +1835,12 @@ export default function App() {
               gridTemplateRows: timers.length >= 3 ? '1fr 1fr' : '1fr',
               gap: 10,
               flex: 1,
-              width: '100%',
-              maxWidth: timers.length === 1 ? 720 : timers.length === 2 ? 720 : 720,
+              width: timers.length <= 2 ? '100%' : '100%',
+              maxWidth: timers.length === 1 ? 380
+    : timers.length === 2 ? 680
+    : 860,
               margin: '0 auto',
+              transition: 'grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1)',
               alignItems: 'stretch',
               alignContent: timers.length <= 2 ? 'center' : 'stretch',
               justifyContent: 'center',
@@ -1775,7 +1865,7 @@ export default function App() {
                 }}>
                   <div style={{
                     width: timers.length === 1
-    ? '50%'
+    ? '100%'
     : timers.length === 3 && idx === 2
       ? '50%'
       : '100%',
@@ -1783,7 +1873,29 @@ export default function App() {
                     flexDirection: 'column',
                     minHeight: 0,
                   }}>
-                    <TimerCard timer={t} count={timers.length} />
+                    <TimerCard
+                    timer={t}
+                    count={timers.length}
+                    isMobile={isMobile}
+                    isDark={isDark}
+                    bgColor={bgColor}
+                    surfBg={surfBg}
+                    borderCol={borderCol}
+                    settings={settings}
+                    editingId={editingId}
+                    editName={editName}
+                    setEditingId={setEditingId}
+                    setEditName={setEditName}
+                    updateTimerField={updateTimerField}
+                    adjustTimer={adjustTimer}
+                    toggleTimer={toggleTimer}
+                    resetTimer={resetTimer}
+                    changeTimerPhase={changeTimerPhase}
+                    setTimerMode={setTimerMode}
+                    setTasks={setTasks}
+                    removeTimer={removeTimer}
+                    setTimers={setTimers}
+                  />
                   </div>
                 </div>
               ))}
@@ -1797,30 +1909,72 @@ export default function App() {
 
         {/* ── SOUNDS TAB ── */}
         {tab==='sounds' && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-            <h2 style={{ fontWeight:300, fontSize:24, letterSpacing:1, marginBottom:28 }}>Ambient Noise</h2>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:24 }}>
-              {NOISE_OPTIONS.map(n => (
-                <button key={n.key} className="noise-btn"
-                  onClick={()=>{ setNoiseKey(n.key); setNoiseOn(true) }}
-                  style={{ background:noiseKey===n.key&&noiseOn?'rgba(0,0,0,0.4)':'rgba(0,0,0,0.18)', border:`1px solid ${noiseKey===n.key&&noiseOn?'rgba(255,255,255,0.6)':'rgba(255,255,255,0.2)'}`, color:noiseKey===n.key&&noiseOn?'#fff':'rgba(255,255,255,0.65)', padding:'18px 10px', borderRadius:10, fontSize:14, fontWeight:700, transition:'all .15s' }}>
-                  {n.label}
-                </button>
-              ))}
-            </div>
-            <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', letterSpacing:1.5, marginBottom:8 }}>VOLUME — {Math.round(volume*100)}%</div>
-              <input type="range" min={0} max={1} step={0.01} value={volume} onChange={e=>setVolume(+e.target.value)}
-                style={{ width:220, accentColor:'#fff' }} />
-            </div>
-            {noiseOn && (
-              <button onClick={()=>setNoiseOn(false)}
-                style={{ background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.25)', color:'rgba(255,255,255,0.8)', padding:'11px 30px', borderRadius:8, fontSize:14, fontWeight:700 }}>
-                Stop Sound
-              </button>
-            )}
+    <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', overflow:'hidden', padding:'0 20px' }}>
+      <div style={{
+        background: 'rgba(255,255,255,0.08)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255,255,255,0.18)',
+        borderTop: '1px solid rgba(255,255,255,0.3)',
+        borderRadius: 24,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+        padding: '32px 36px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 20,
+        width: '100%',
+        maxWidth: 420,
+      }}>
+        <h2 style={{ fontWeight:300, fontSize:22, letterSpacing:1, margin:0, color:'#fff' }}>Ambient Noise</h2>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, width:'100%' }}>
+          {NOISE_OPTIONS.map(n => (
+            <button key={n.key} className="noise-btn"
+              onClick={()=>{ setNoiseKey(n.key); setNoiseOn(true) }}
+              style={{
+                background: noiseKey===n.key&&noiseOn ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)',
+                border: `1px solid ${noiseKey===n.key&&noiseOn ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.15)'}`,
+                backdropFilter: 'blur(8px)',
+                color: '#fff',
+                padding: '14px 8px',
+                borderRadius: 12,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all .15s',
+                letterSpacing: 0.3,
+              }}>
+              {n.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ textAlign:'center', width:'100%' }}>
+          <div style={{ fontSize:11, color:'rgba(255,255,255,0.55)', letterSpacing:1.5, marginBottom:10 }}>
+            VOLUME — {Math.round(volume*100)}%
           </div>
+          <input type="range" min={0} max={1} step={0.01} value={volume}
+            onChange={e=>setVolume(+e.target.value)}
+            style={{ width:'100%', accentColor:'rgba(255,255,255,0.8)' }} />
+        </div>
+        {noiseOn && (
+          <button onClick={()=>setNoiseOn(false)}
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.25)',
+              backdropFilter: 'blur(8px)',
+              color: '#fff',
+              padding: '10px 28px',
+              borderRadius: 100,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}>
+            Stop Sound
+          </button>
         )}
+      </div>
+    </div>
+  )}
 
         {/* ── NOTES TAB ── */}
         {tab==='notes' && (
@@ -1828,7 +1982,7 @@ export default function App() {
             <h2 style={{ fontWeight:300, fontSize:24, letterSpacing:1, marginBottom:24 }}>Notes</h2>
             <textarea value={note} onChange={e=>setNote(e.target.value)}
               placeholder="Type your notes here..."
-              style={{ width:'100%', height: 'calc(100vh - 260px)', background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', padding:20, borderRadius:12, fontSize:15, lineHeight:1.75, resize:'vertical', caretColor:'#fff', transition:'border .2s' }}
+              style={{ width:'100%', height: 'calc((100vh - 260px) * 0.5)', background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', padding:20, borderRadius:12, fontSize:15, lineHeight:1.75, resize:'vertical', caretColor:'#fff', transition:'border .2s' }}
               onFocus={e=>e.target.style.borderColor='rgba(255,255,255,0.45)'}
               onBlur={e=>e.target.style.borderColor='rgba(255,255,255,0.2)'} />
             <div style={{ display:'flex', gap:10, justifyContent:'center', marginTop:14 }}>
@@ -1856,7 +2010,18 @@ export default function App() {
               justifyItems: 'center',
               transition: 'all 0.45s cubic-bezier(0.23,1,0.32,1)',
             }}>
-              {(stopwatches || []).map(sw => <SWCard key={sw.id} sw={sw} count={stopwatches.length} />)}
+              {(stopwatches || []).map(sw => 
+                <SWCard
+                  key={sw.id}
+                  sw={sw}
+                  count={stopwatches.length}
+                  bgColor={bgColor}
+                  removeSW={removeSW}
+                  toggleSW={toggleSW}
+                  lapSW={lapSW}
+                  resetSW={resetSW}
+                />
+              )}
             </div>
           </div>
         )}
@@ -2049,7 +2214,7 @@ export default function App() {
               }}
             >
               <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#fff' }}>
-                🎮 Level {level} — {playerTitle}
+                🎮 Level {level} - {playerTitle}
               </h3>
 
               <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginBottom: 10 }}>
@@ -2071,7 +2236,7 @@ export default function App() {
                       background: 'rgba(16,185,129,0.15)',
                       padding: '6px 10px',
                       borderRadius: 20,
-                      fontSize: 12,
+                      fontSize: 'clamp(10px, 1vw, 13px)',
                       color: '#fff',
                       border: '1px solid rgba(16,185,129,0.3)'
                     }}
@@ -2180,7 +2345,7 @@ export default function App() {
             {lbLoading ? (
               <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.5)' }}>Loading...</div>
             ) : leaderboard.length === 0 ? (
-              <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.5)' }}>No sessions this week yet — be the first!</div>
+              <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.5)' }}>No sessions this week yet - be the first!</div>
             ) : leaderboard.map((e,i)=>(
               <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 10px', borderBottom:'1px solid rgba(255,255,255,0.07)', borderRadius:8, marginBottom:4, background:i<3?'rgba(255,255,255,0.04)':'transparent' }}>
                 <div style={{ width:30, textAlign:'center', fontSize:i<3?20:14 }}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</div>
@@ -2236,7 +2401,7 @@ export default function App() {
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:22 }}>per month · cancel anytime</div>
             <button onClick={()=>window.open('https://buy.stripe.com/test_bJe00j01mcZk6JOeMH8k800','_blank')}
               style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:15, borderRadius:12, fontSize:16, fontWeight:800, marginBottom:10 }}>
-              Start Pro — $4.99/mo
+              Start Pro - $4.99/mo
             </button>
             <button onClick={()=>setShowUpgrade(false)}
               style={{ width:'100%', background:'transparent', border:'1px solid rgba(255,255,255,0.18)', color:'rgba(255,255,255,0.55)', padding:12, borderRadius:12, fontSize:14 }}>
@@ -2289,54 +2454,30 @@ export default function App() {
         </div>
       )}
 
-  {focusMode && (() => {
-    const runningTimer = (timers || []).find(t => t.running)
-    const displayTimer = runningTimer || timers[0]
-    return (
+  {focusMode && focusModeDisplayTimer && (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 9000,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundImage: `url('${currentBgImage}')`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    }}>
       <div style={{
-        position: 'fixed',
+        position: 'absolute',
         inset: 0,
-        zIndex: 9000,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundImage: `url('${currentBgImage}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-      }}>
-        {/* Dark overlay for blurred background */}
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'rgba(0,0,0,0.55)',
-          backdropFilter: 'blur(18px)',
-          WebkitBackdropFilter: 'blur(18px)',
-          zIndex: 0,
-        }}/>
-        
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-          {/* Exit button */}
-        <button
-          onClick={() => setFocusMode(false)}
-          style={{
-            position: 'absolute',
-            top: 20,
-            right: 20,
-            background: 'rgba(255,255,255,0.1)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff',
-            fontSize: 13,
-            padding: '6px 16px',
-            borderRadius: 20,
-            cursor: 'pointer',
-            fontWeight: 600,
-            letterSpacing: 0.5,
-          }}>
-          ✕ Exit Focus Mode
-        </button>
+        background: 'rgba(0,0,0,0.55)',
+        backdropFilter: 'blur(18px)',
+        WebkitBackdropFilter: 'blur(18px)',
+        zIndex: 0,
+      }}/>
 
-        {/* ESC hint */}
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+
         <div style={{
           position: 'absolute',
           top: 28,
@@ -2349,94 +2490,84 @@ export default function App() {
           Press ESC to exit
         </div>
 
-        {displayTimer && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 20,
+        }}>
           <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 20,
+            fontSize: 22,
+            color: 'rgba(255,255,255,0.7)',
+            letterSpacing: 3,
+            fontFamily: "'Caveat', cursive",
           }}>
-            {/* Timer name */}
-            <div style={{
-              fontSize: 22,
-              color: 'rgba(255,255,255,0.7)',
-              letterSpacing: 3,
-              fontFamily: "'Caveat', cursive",
-            }}>
-              {displayTimer.name}
-            </div>
-
-            {/* Big time display */}
-            <div style={{
-              fontSize: 'clamp(96px, 20vw, 200px)',
-              fontWeight: 300,
-              color: '#fff',
-              fontFamily: "'Outfit', sans-serif",
-              letterSpacing: -4,
-              textShadow: '0 4px 32px rgba(0,0,0,0.4)',
-              lineHeight: 1,
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              {fmtTime(displayTimer.secsLeft)}
-            </div>
-
-            {/* Phase label */}
-            <div style={{
-              fontSize: 11,
-              color: 'rgba(255,255,255,0.55)',
-              letterSpacing: 4,
-              fontFamily: "'Outfit', sans-serif",
-            }}>
-              {displayTimer.mode === 'pomodoro' ? 'FOCUS SESSION' : 'BREAK TIME'}
-            </div>
-
-            {/* Controls */}
-            <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-              <button
-                onClick={() => toggleTimer(displayTimer.id)}
-                style={{
-                  padding: '16px 56px',
-                  borderRadius: 100,
-                  border: '1px solid rgba(255,255,255,0.6)',
-                  background: 'rgba(255,255,255,0.95)',
-                  color: '#1a0a20',
-                  fontSize: 16,
-                  fontWeight: 700,
-                  letterSpacing: 3,
-                  cursor: 'pointer',
-                  fontFamily: "'Outfit', sans-serif",
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-                }}>
-                {displayTimer.running ? 'PAUSE' : 'START'}
-              </button>
-              <button
-                onClick={() => resetTimer(displayTimer.id)}
-                style={{
-                  padding: '16px 32px',
-                  borderRadius: 100,
-                  border: '1px solid rgba(255,255,255,0.25)',
-                  background: 'rgba(255,255,255,0.12)',
-                  color: '#fff',
-                  fontSize: 16,
-                  fontWeight: 700,
-                  letterSpacing: 2,
-                  cursor: 'pointer',
-                  fontFamily: "'Outfit', sans-serif",
-                  backdropFilter: 'blur(8px)',
-                }}>
-                ↺ RESET
-              </button>
-            </div>
+            {focusModeDisplayTimer.name}
           </div>
-        )}
+
+          <div style={{
+            fontSize: 'clamp(96px, 20vw, 200px)',
+            fontWeight: 300,
+            color: '#fff',
+            fontFamily: "'Outfit', sans-serif",
+            letterSpacing: -4,
+            textShadow: '0 4px 32px rgba(0,0,0,0.4)',
+            lineHeight: 1,
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            {fmtTime(focusModeDisplayTimer.secsLeft)}
+          </div>
+
+          <div style={{
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.55)',
+            letterSpacing: 4,
+            fontFamily: "'Outfit', sans-serif",
+          }}>
+            {focusModeDisplayTimer.mode === 'pomodoro' ? 'FOCUS SESSION' : 'BREAK TIME'}
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+            <button
+              onClick={() => toggleTimer(focusModeDisplayTimer.id)}
+              style={{
+                padding: '16px 56px',
+                borderRadius: 100,
+                border: '1px solid rgba(255,255,255,0.6)',
+                background: 'rgba(255,255,255,0.95)',
+                color: '#1a0a20',
+                fontSize: 16,
+                fontWeight: 700,
+                letterSpacing: 3,
+                cursor: 'pointer',
+                fontFamily: "'Outfit', sans-serif",
+                boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+              }}>
+              {focusModeDisplayTimer.running ? 'PAUSE' : 'START'}
+            </button>
+            <button
+              onClick={() => resetTimer(focusModeDisplayTimer.id)}
+              style={{
+                padding: '16px 32px',
+                borderRadius: 100,
+                border: '1px solid rgba(255,255,255,0.25)',
+                background: 'rgba(255,255,255,0.12)',
+                color: '#fff',
+                fontSize: 16,
+                fontWeight: 700,
+                letterSpacing: 2,
+                cursor: 'pointer',
+                fontFamily: "'Outfit', sans-serif",
+                backdropFilter: 'blur(8px)',
+              }}>
+              ↺ RESET
+            </button>
+          </div>
         </div>
       </div>
-    )
-  })()}
-      </div>
-
-      {/* SoundCloud Music Player — hidden iframe + custom glass UI */}
-        {/* Hidden SoundCloud iframe — loads in background */}
+    </div>
+  )}     {/* SoundCloud Music Player - hidden iframe + custom glass UI */}
+        {/* Hidden SoundCloud iframe - loads in background */}
         <iframe
           id="sc-iframe"
           title="SC"
@@ -2562,8 +2693,9 @@ export default function App() {
           </button>
         </div>
 
-      {/* Focus Mode Button — bottom right */}
+      {/* Focus Mode Button - bottom right */}
       <button
+        className="focus-bottom-btn"
         onClick={() => setFocusMode(f => !f)}
         title="Focus Mode"
         style={{
@@ -2603,5 +2735,6 @@ export default function App() {
         ⛶
       </button>
     </div>
+  </div>
   )
 }
