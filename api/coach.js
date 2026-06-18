@@ -25,14 +25,12 @@ export default async function handler(req, res) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
-
     const ctx = context || {}
     const tasksSummary = (ctx.tasks || [])
       .map(t => `- ${t.name} (${t.completedPomodoros || 0}/${t.estimatedPomodoros || 1} pomodoros, ${t.done ? 'done' : 'pending'})`)
       .join('\n') || 'No tasks added yet.'
 
-    const systemContext = `You are a warm, practical productivity coach inside a Pomodoro timer app called Pomodoros.io. 
+    const systemContext = `You are a warm, practical productivity coach inside a Pomodoro timer app called Pomodoros.io.
 Keep replies SHORT (2-4 sentences max), conversational, and actionable. Never use markdown formatting like asterisks or bullet points unless listing concrete steps.
 
 USER'S CURRENT DATA:
@@ -48,16 +46,25 @@ USER'S CURRENT DATA:
 CURRENT TASKS:
 ${tasksSummary}
 
-Use this data naturally when relevant (e.g. "since you've already focused 40 minutes today..."). Don't recite all the stats back robotically. Focus on being genuinely helpful for planning, motivation, and beating procrastination for students and workers.`
+Use this data naturally when relevant. Don't recite all the stats back robotically. Focus on being genuinely helpful for planning, motivation, and beating procrastination for students and workers.`
+
+    // Pass systemInstruction as a proper Content object with role 'system'
+    // when CREATING the model, not inside startChat history config.
+    const modelWithSystem = genAI.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+      systemInstruction: {
+        role: 'system',
+        parts: [{ text: systemContext }],
+      },
+    })
 
     const chatHistory = (history || []).slice(-10).map(h => ({
       role: h.role === 'user' ? 'user' : 'model',
       parts: [{ text: h.text }],
     }))
 
-    const chat = model.startChat({
+    const chat = modelWithSystem.startChat({
       history: chatHistory,
-      systemInstruction: systemContext,
     })
 
     const result = await chat.sendMessage(message)
