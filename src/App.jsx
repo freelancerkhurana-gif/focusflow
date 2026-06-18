@@ -1594,10 +1594,15 @@ export default function App() {
         }),
       })
 
-      if (!response.ok) throw new Error('API error')
       const data = await response.json()
-      const reply = data.reply || "Sorry, I couldn't generate a response. Try again?"
+      console.log('Coach API response:', response.status, data)
 
+      if (!response.ok) {
+        console.error('Coach API error detail:', data)
+        throw new Error(data.detail || data.error || 'API error')
+      }
+
+      const reply = data.reply || "Sorry, I couldn't generate a response. Try again?"
       setCoachMessages2(prev => [...prev, { role:'coach', text:reply, ts:Date.now() }])
 
       if (user) {
@@ -1606,12 +1611,12 @@ export default function App() {
         }).then(() => {}).catch(() => {})
       }
     } catch (err) {
-    console.error('Coach chat error:', err)
-    setCoachMessages2(prev => [...prev, {
-      role:'coach',
-      text: "I'm having trouble connecting right now. Please try again in a moment.",
-      ts: Date.now(),
-    }])
+      console.error('Coach chat error:', err.message)
+      setCoachMessages2(prev => [...prev, {
+        role:'coach',
+        text: "I'm having trouble connecting right now (" + err.message + "). Please try again in a moment.",
+        ts: Date.now(),
+      }])
     } finally {
       setCoachTyping(false)
     }
