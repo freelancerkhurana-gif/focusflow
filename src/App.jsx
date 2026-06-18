@@ -248,6 +248,7 @@ const generateCoachMessage = (totalFocusSecs, totalCycles, streak, focusScore, d
   return messages
 }
 
+
 const checkBadges = (totalCycles, streak, focusScore) => {
   const earned = []
 
@@ -991,6 +992,12 @@ export default function App() {
   const [scPlaying, setScPlaying] = useState(false)
   const [scReady, setScReady] = useState(false)
 
+  // ── AI COACH CHAT ──
+  const [coachChatOpen, setCoachChatOpen] = useState(false)
+  const [coachMessages2, setCoachMessages2] = useState(() => ls.get('pom_coach_chat', []))
+  const [coachInput, setCoachInput] = useState('')
+  const [coachTyping, setCoachTyping] = useState(false)
+
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem('pom_theme_dark')
@@ -1030,6 +1037,22 @@ export default function App() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (!user) return
+    supabase
+      .from('coach_conversations')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true })
+      .limit(50)
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          const loaded = data.map(d => ({ role: d.role, text: d.message, ts: new Date(d.created_at).getTime() }))
+          setCoachMessages2(loaded)
+        }
+      })
+  }, [user])
 
   const signIn = () => supabase.auth.signInWithOAuth({
     provider: 'google', options: { redirectTo: window.location.origin }
@@ -1426,6 +1449,7 @@ export default function App() {
   useEffect(() => { ls.set('pom_templates', templates) }, [templates])
   useEffect(() => { ls.set('pom_settings', settings) }, [settings])
   useEffect(() => { ls.set('pom_note', note) }, [note])
+  useEffect(() => { ls.set('pom_coach_chat', coachMessages2) }, [coachMessages2])
   useEffect(() => {
     localStorage.setItem('pom_theme_dark', JSON.stringify(isDark))
   }, [isDark])
@@ -1471,6 +1495,127 @@ export default function App() {
       ls.set('pom_weekly_insights', insights)
     }
   }, [hourlyFocusData])
+
+  // ─── AI COACH CHAT FUNCTIONS ─────────────────────────────────────────────────────
+  const generateCoachReply = (userMsg) => {
+    const msg = userMsg.toLowerCase()
+    const remaining = pendingTasks
+    const hoursLeft = Math.max(0, settings.dailyGoalHours - totalFocusSecs/3600)
+
+    // Planning / scheduling requests
+    if (msg.includes('plan') || msg.includes('schedule') || msg.includes('organize')) {
+      if (remaining.length === 0) {
+        return "You don't have any tasks listed yet. Add a few tasks below and tell me your deadline — I'll help you break them into focused Pomodoro blocks."
+      }
+      const totalPomos = remaining.reduce((s,t) => s + ((t.estimatedPomodoros||1) - (t.completedPomodoros||0)), 0)
+      const totalMins = totalPomos * settings.pomodoroMin
+      return `You have ${remaining.length} task(s) left, roughly ${totalPomos} Pomodoro session(s) (~${Math.round(totalMins/60*10)/10}h). I'd suggest tackling "${remaining[0].name}" first since it's at the top of your list — start with one ${settings.pomodoroMin}-min focus block, then a ${settings.shortBreakMin}-min break. Want me to suggest an order based on urgency?` 
+    }
+
+    // Motivation requests
+    if (msg.includes('motivat') || msg.includes('tired') || msg.includes('stuck') || msg.includes('procrastinat') || msg.includes("don't want") || msg.includes('dont want')) {
+      const lines = [
+        `Totally normal to feel this way. You've already focused ${fmtTime(totalFocusSecs)} today — that's real progress. Try just ONE more 10-minute block. Momentum beats willpower.`,
+        `Here's a trick: commit to just the first 5 minutes of the task. Often starting is the hardest part — once you're in motion, continuing is easy.`,
+        `You're ${streak > 0 ? `on a ${streak}-day streak` : 'building a habit'} — don't break it now. One small session counts. Pick the smallest possible piece of your task and start there.`,
+        `Low energy is data, not a verdict. Try switching to your easiest task for one Pomodoro to rebuild momentum, then return to the harder one.`,
+      ]
+      return lines[Math.floor(Math.random()*lines.length)]
+    }
+
+    // Deadline / urgency
+    if (msg.includes('deadline') || msg.includes('due') || msg.includes('exam') || msg.includes('tomorrow') || msg.includes('today')) {
+      return `Got it — that's urgent. With ${remaining.length} task(s) pending, I'd suggest working in tight ${settings.pomodoroMin}/${settings.shortBreakMin} cycles with minimal breaks between, and save your longest break for after the hardest task. Want me to estimate how many cycles you'll need?` 
+    }
+
+    // Study specific
+    if (msg.includes('study') || msg.includes('exam') || msg.includes('revis')) {
+      return `For studying, active recall beats re-reading. Try: 1 Pomodoro reading/taking notes, then 1 Pomodoro testing yourself without looking. Repeat. Want help splitting your material into session-sized chunks?` 
+    }
+
+    // Work/project specific
+    if (msg.includes('project') || msg.includes('work') || msg.includes('report') || msg.includes('client')) {
+      return `For project work, the first session should just be planning — outline what "done" looks like before diving in. That alone often removes the biggest blocker: not knowing where to start.` 
+    }
+
+    // Stats / progress questions
+    if (msg.includes('how am i doing') || msg.includes('progress') || msg.includes('stats')) {
+      return `Today: ${fmtTime(totalFocusSecs)} focused, ${totalCycles} cycles completed, focus score ${focusScore}%. ${hoursLeft > 0 ? `You're ${Math.round(hoursLeft*60)} min from your daily goal.` : "You've hit your daily goal — nice work!"}` 
+    }
+
+    // Break related
+    if (msg.includes('break') || msg.includes('rest')) {
+      return `Breaks aren't wasted time — they're what let your brain consolidate what you just learned. Step away from the screen if you can; even 2 minutes of looking outside helps more than scrolling.` 
+    }
+
+    // Greeting
+    if (msg.includes('hi') || msg.includes('hello') || msg.includes('hey')) {
+      return `Hey! I'm here to help you plan your work, stay motivated, or just talk through what's blocking you. What are you working on today?` 
+    }
+
+    // Default fallback
+    const fallbacks = [
+      `Tell me what you're working on and your deadline (if any) — I can help break it into focused sessions.`,
+      `I can help you plan tasks, push through procrastination, or just check in on your progress. What's on your mind?`,
+      `Want a study plan, a motivation boost, or a look at today's stats? Just ask.`,
+    ]
+    return fallbacks[Math.floor(Math.random()*fallbacks.length)]
+  }
+
+  const sendCoachMessage = async () => {
+    const trimmed = coachInput.trim()
+    if (!trimmed) return
+    const userEntry = { role:'user', text:trimmed, ts:Date.now() }
+    setCoachMessages2(prev => [...prev, userEntry])
+    setCoachInput('')
+    setCoachTyping(true)
+
+    // Save user message to Supabase if signed in
+    if (user) {
+      supabase.from('coach_conversations').insert({
+        user_id: user.id, role: 'user', message: trimmed,
+      }).then(() => {}).catch(() => {})
+    }
+
+    try {
+      const contextPayload = {
+        totalFocusSecs, totalBreakSecs, totalCycles, focusScore, streak,
+        tasks, settings, heatmapData, dailyReview,
+        isSignedIn: !!user,
+      }
+
+      const response = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: trimmed,
+          context: contextPayload,
+          history: coachMessages2,
+        }),
+      })
+
+      if (!response.ok) throw new Error('API error')
+      const data = await response.json()
+      const reply = data.reply || "Sorry, I couldn't generate a response. Try again?"
+
+      setCoachMessages2(prev => [...prev, { role:'coach', text:reply, ts:Date.now() }])
+
+      if (user) {
+        supabase.from('coach_conversations').insert({
+          user_id: user.id, role: 'coach', message: reply,
+        }).then(() => {}).catch(() => {})
+      }
+    } catch (err) {
+    console.error('Coach chat error:', err)
+    setCoachMessages2(prev => [...prev, {
+      role:'coach',
+      text: "I'm having trouble connecting right now. Please try again in a moment.",
+      ts: Date.now(),
+    }])
+    } finally {
+      setCoachTyping(false)
+    }
+  }
 
   // ─── COACH UPDATES ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -2260,223 +2405,315 @@ export default function App() {
 
         {/* ── STATS TAB ── */}
         {tab==='stats' && (
-          <div style={{ flex:1, overflowY:'auto', padding:'0 16px 16px' }}>
-            <h2 style={{ textAlign:'center', fontSize:13, fontWeight:700, letterSpacing:2, textTransform:'uppercase', color:'rgba(255,255,255,0.7)', marginBottom:20 }}>Today's Report</h2>
+          <div style={{ flex:1, overflowY:'auto', padding:'16px 20px 40px', boxSizing:'border-box' }}>
 
-            {/* Tasks section */}
-            <div style={{ maxWidth: 680, margin: '0 auto 24px' }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid rgba(255,255,255,0.1)', paddingBottom:8, marginBottom:12 }}>
-                <span style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, color:'rgba(255,255,255,0.5)', textTransform:'uppercase' }}>Tasks</span>
-                <span style={{ fontSize:11, color:'rgba(255,255,255,0.4)' }}>{pendingTasks.length} remaining</span>
-              </div>
-              {tasks.map(task => (
-                <div key={task.id}
-                  onClick={() => setActiveTaskId(task.id===activeTaskId?null:task.id)}
-                  style={{ display:'flex', alignItems:'center', gap:10, background:activeTaskId===task.id?'rgba(255,255,255,0.08)':'rgba(255,255,255,0.03)', border:activeTaskId===task.id?'1px solid rgba(255,255,255,0.3)':'1px solid rgba(255,255,255,0.07)', borderRadius:10, padding:'10px 14px', marginBottom:6, cursor:'pointer' }}>
-                  <input type="checkbox" checked={task.done} onClick={e=>e.stopPropagation()}
-                    onChange={e => setTasks(prev => prev.map(t => t.id===task.id?{...t,done:e.target.checked}:t))}
-                    style={{ width:14, height:14, cursor:'pointer', flexShrink:0 }}/>
-                  <span style={{ flex:1, fontSize:13, fontWeight:500, textDecoration:task.done?'line-through':'none', color:task.done?'rgba(255,255,255,0.35)':'#fff' }}>{task.name}</span>
-                  <div style={{ display:'flex', gap:3 }}>
-                    {Array(task.estimatedPomodoros||1).fill(0).map((_,i)=>(
-                      <div key={i} style={{ width:7, height:7, borderRadius:'50%', background:i<(task.completedPomodoros||0)?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.18)' }}/>
-                    ))}
-                  </div>
-                  <button onClick={e=>{e.stopPropagation();setTasks(prev=>prev.filter(t=>t.id!==task.id))}}
-                    style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.3)', fontSize:16, cursor:'pointer', flexShrink:0 }}
-                    onMouseEnter={e=>e.currentTarget.style.color='#fff'}
-                    onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.3)'}>×</button>
-                </div>
-              ))}
-              <div style={{ border:'1px dashed rgba(255,255,255,0.15)', borderRadius:10, padding:'10px 14px', cursor:'text', background:'rgba(255,255,255,0.02)' }}
-                onClick={()=>document.getElementById('pom-task-inp-report')?.focus()}>
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <span style={{ fontSize:18, color:'rgba(255,255,255,0.3)' }}>＋</span>
-                  <input id="pom-task-inp-report" value={newTask} onChange={e=>setNewTask(e.target.value)}
-                    onKeyDown={e=>{if(e.key==='Enter'&&newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
-                    placeholder="Add task (Enter to save)"
-                    style={{ flex:1, background:'transparent', border:'none', color:'#fff', fontSize:13, caretColor:'#fff' }}/>
-                </div>
-                {newTask && (
-                  <div style={{ display:'flex', gap:8, marginTop:8, alignItems:'center' }}>
-                    <select value={newTaskEst} onChange={e=>setNewTaskEst(+e.target.value)}
-                      style={{ background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', padding:'3px 6px', borderRadius:6, fontSize:12 }}>
-                      {Array.from({length:10},(_,i)=><option key={i+1} value={i+1}>{i+1}🍅</option>)}
-                    </select>
-                    <button onClick={()=>{if(newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
-                      style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', padding:'4px 14px', borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer' }}>Add</button>
-                    <button onClick={()=>setNewTask('')}
-                      style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.15)', color:'rgba(255,255,255,0.5)', padding:'4px 10px', borderRadius:8, fontSize:12, cursor:'pointer' }}>Cancel</button>
-                  </div>
-                )}
-              </div>
+            {/* ── PAGE TITLE ── */}
+            <div style={{ textAlign:'center', marginBottom:24 }}>
+              <div style={{ fontSize:13, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:4 }}>Daily Report</div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.3)', letterSpacing:1 }}>{new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</div>
             </div>
 
-            {/* Stat cards */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:10, marginBottom:16 }}>
-              {[
-                {l:'Focus Time', v:fmtTime(totalFocusSecs)},
-                {l:'Break Time', v:fmtTime(totalBreakSecs)},
-                {l:'Cycles', v:totalCycles},
-                {l:'Focus Score', v:focusScore+'%'},
-              ].map(s=>(
-                <div key={s.l} className="stat-card" style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, padding:'18px 14px', textAlign:'center' }}>
-                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', letterSpacing:1, textTransform:'uppercase', marginBottom:8 }}>{s.l}</div>
-                  <div style={{ fontSize:28, fontWeight:300, fontVariantNumeric:'tabular-nums' }}>{s.v}</div>
-                </div>
-              ))}
-            </div>
+            <div style={{ maxWidth:700, margin:'0 auto', display:'flex', flexDirection:'column', gap:16 }}>
 
-            {/* Action buttons */}
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center', marginBottom:16 }}>
-              {[
-                {l:'Clear Stats', fn:()=>{setTimers(p=>p.map(t=>({...t,totalFocusSecs:0,totalBreakSecs:0,cyclesDone:0})));showToast('Stats cleared')}},
-                {l:'Export CSV', fn:exportCSV},
-                {l:'Share on X', fn:shareX},
-                {l:'🏆 Leaderboard', fn:()=>{setShowLeaderboard(true);loadLeaderboard()}},
-                user&&{l:'☁️ Sync to Cloud', fn:syncToCloud},
-              ].filter(Boolean).map(b=>(
-                <button key={b.l} onClick={b.fn}
-                  style={{ background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.22)', color:'rgba(255,255,255,0.8)', padding:'9px 16px', borderRadius:7, fontSize:13, fontWeight:700 }}
-                  onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.35)'}
-                  onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0.2)'}>
-                  {b.l}
-                </button>
-              ))}
-            </div>
-
-            {/* Per-timer breakdown */}
-            {timers.map(t=>(
-              <div key={t.id} style={{ background:'rgba(0,0,0,0.15)', border:'1px solid rgba(255,255,255,0.12)', borderLeft:'3px solid rgba(255,255,255,0.5)', borderRadius:8, padding:'12px 16px', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
-                <span style={{ fontSize:14, fontWeight:700 }}>{t.name}</span>
-                <div style={{ display:'flex', gap:14, fontSize:12, color:'rgba(255,255,255,0.65)' }}>
-                  <span>Focus: {fmtTime(t.totalFocusSecs)}</span>
-                  <span>Break: {fmtTime(t.totalBreakSecs)}</span>
-                  <span>Cycles: {t.cyclesDone}</span>
-                </div>
-              </div>
-            ))}
-
-            {/* Daily goal */}
-            <div style={{ background:'rgba(0,0,0,0.18)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, padding:18, marginTop:12 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                <span style={{ fontSize:11, color:'rgba(255,255,255,0.5)', letterSpacing:1 }}>DAILY GOAL ({settings.dailyGoalHours}h)</span>
-                <span style={{ fontSize:12, fontWeight:700 }}>{Math.min(100,Math.round((totalFocusSecs/(settings.dailyGoalHours*3600))*100))}%</span>
-              </div>
-              <div style={{ background:'rgba(0,0,0,0.25)', borderRadius:100, height:8 }}>
-                <div style={{ background:'rgba(255,255,255,0.7)', borderRadius:100, height:8, width:`${Math.min(100,(totalFocusSecs/(settings.dailyGoalHours*3600))*100)}%`, transition:'width .5s' }}/>
-              </div>
-              {streak>0 && <div style={{ textAlign:'center', marginTop:12, fontSize:14 }}>🔥 <strong>{streak}</strong> day streak</div>}
-            </div>
-
-            {/* Focus Heatmap */}
-            <div
-              style={{
-                background: 'rgba(0,0,0,0.18)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 10,
-                padding: 16,
-                marginTop: 14
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 11,
-                  letterSpacing: 2,
-                  color: 'rgba(255,255,255,0.5)',
-                  marginBottom: 12,
-                  textTransform: 'uppercase'
-                }}
-              >
-                Focus Heatmap
-              </div>
-
-              <HeatmapGrid />
-
-              {weeklyInsights.bestHour && (
-                <div
-                  style={{
-                    marginTop: 14,
-                    textAlign: 'center',
-                    color: 'rgba(255,255,255,0.7)',
-                    fontSize: 13
-                  }}
-                >
-                  🧠 Best Focus Hour:
-                  <strong> {weeklyInsights.bestHour}:00 </strong>
-                  ({weeklyInsights.focusMinutes} mins)
-                </div>
-              )}
-            </div>
-
-            {/* AI Productivity Coach */}
-            <div
-              style={{
-                background: 'rgba(0,0,0,0.18)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 10,
-                padding: 16,
-                marginTop: 14
-              }}
-            >
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#fff' }}>🧠 AI Productivity Coach</h3>
-
-              {coachMessages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    marginBottom: 8,
-                    color: 'rgba(255,255,255,0.7)',
-                    fontSize: 13
-                  }}
-                >
-                  • {msg}
-                </div>
-              ))}
-            </div>
-
-            {/* RPG Level System */}
-            <div
-              style={{
-                background: 'rgba(0,0,0,0.18)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 10,
-                padding: 16,
-                marginTop: 14
-              }}
-            >
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: '#fff' }}>
-                🎮 Level {level} - {playerTitle}
-              </h3>
-
-              <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginBottom: 10 }}>
-                XP: {xp}
-              </div>
-
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 6,
-                  marginTop: 10
-                }}
-              >
-                {badges.map(badge => (
-                  <div
-                    key={badge}
-                    style={{
-                      background: 'rgba(16,185,129,0.15)',
-                      padding: '6px 10px',
-                      borderRadius: 20,
-                      fontSize: 'clamp(10px, 1vw, 13px)',
-                      color: '#fff',
-                      border: '1px solid rgba(16,185,129,0.3)'
-                    }}
-                  >
-                    {badge}
+              {/* ── HERO STATS ROW ── */}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+                {[
+                  { icon:'⏱', label:'Focus Time', value: fmtTime(totalFocusSecs), sub: `${Math.floor(totalFocusSecs/3600)}h ${Math.floor((totalFocusSecs%3600)/60)}m` },
+                  { icon:'☕', label:'Break Time', value: fmtTime(totalBreakSecs), sub: `${(totalBreakSecs/60).toFixed(0)} mins` },
+                  { icon:'🔄', label:'Cycles Done', value: totalCycles, sub: `${settings.longBreakEvery - (totalCycles % settings.longBreakEvery)} to long break` },
+                  { icon:'🎯', label:'Focus Score', value: focusScore + '%', sub: focusScore >= 80 ? 'Excellent' : focusScore >= 60 ? 'Good' : focusScore >= 40 ? 'Fair' : 'Keep going' },
+                ].map(s => (
+                  <div key={s.label} style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'14px 12px', textAlign:'center' }}>
+                    <div style={{ fontSize:20, marginBottom:4 }}>{s.icon}</div>
+                    <div style={{ fontSize:22, fontWeight:700, color:'#fff', fontFamily:"'Outfit',sans-serif", fontVariantNumeric:'tabular-nums' }}>{s.value}</div>
+                    <div style={{ fontSize:9, color:'rgba(255,255,255,0.45)', letterSpacing:1, textTransform:'uppercase', marginTop:2 }}>{s.label}</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:2 }}>{s.sub}</div>
                   </div>
                 ))}
               </div>
+
+              {/* ── DAILY GOAL PROGRESS ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>Daily Goal</div>
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', marginTop:2 }}>Target: {settings.dailyGoalHours}h of deep focus</div>
+                  </div>
+                  <div style={{ fontSize:28, fontWeight:800, color:'#fff', fontFamily:"'Outfit',sans-serif" }}>
+                    {Math.min(100, Math.round((totalFocusSecs / (settings.dailyGoalHours * 3600)) * 100))}%
+                  </div>
+                </div>
+                <div style={{ background:'rgba(255,255,255,0.1)', borderRadius:100, height:8, overflow:'hidden' }}>
+                  <div style={{
+                    background: totalFocusSecs >= settings.dailyGoalHours * 3600
+                      ? 'rgba(16,185,129,0.9)'
+                      : 'rgba(255,255,255,0.7)',
+                    borderRadius:100, height:8,
+                    width: Math.min(100,(totalFocusSecs/(settings.dailyGoalHours*3600))*100) + '%',
+                    transition:'width 0.5s ease',
+                  }}/>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', marginTop:6, fontSize:10, color:'rgba(255,255,255,0.35)' }}>
+                  <span>0h</span>
+                  <span>{settings.dailyGoalHours/2}h</span>
+                  <span>{settings.dailyGoalHours}h</span>
+                </div>
+                {streak > 0 && (
+                  <div style={{ marginTop:10, fontSize:12, color:'rgba(255,255,255,0.6)', textAlign:'center' }}>
+                    🔥 <strong style={{color:'#fff'}}>{streak} day</strong> streak — keep it going!
+                  </div>
+                )}
+              </div>
+
+              {/* ── PER-TIMER BREAKDOWN ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:12 }}>Timer Breakdown</div>
+                {timers.map((t, i) => {
+                  const pct = t.totalFocusSecs + t.totalBreakSecs > 0
+                    ? Math.round((t.totalFocusSecs / (t.totalFocusSecs + t.totalBreakSecs)) * 100)
+                    : 0
+                  return (
+                    <div key={t.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0', borderBottom: i < timers.length-1 ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
+                      <div style={{ width:32, height:32, borderRadius:'50%', background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:'#fff', flexShrink:0 }}>{i+1}</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, fontWeight:600, color:'#fff', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.name}</div>
+                        <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:100, height:4 }}>
+                          <div style={{ background:'rgba(255,255,255,0.6)', borderRadius:100, height:4, width:pct+'%', transition:'width 0.5s' }}/>
+                        </div>
+                      </div>
+                      <div style={{ textAlign:'right', flexShrink:0 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{fmtTime(t.totalFocusSecs)}</div>
+                        <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>{t.cyclesDone} cycles</div>
+                      </div>
+                    </div>
+                  )
+                })}
+                {timers.every(t => t.totalFocusSecs === 0) && (
+                  <div style={{ textAlign:'center', padding:'20px 0', fontSize:13, color:'rgba(255,255,255,0.35)' }}>
+                    Start a timer to see your breakdown here
+                  </div>
+                )}
+              </div>
+
+              {/* ── TASKS ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                  <div style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:'uppercase', color:'rgba(255,255,255,0.5)' }}>Tasks</div>
+                  <span style={{ fontSize:11, color:'rgba(255,255,255,0.4)' }}>{pendingTasks.length} remaining</span>
+                </div>
+                {tasks.length === 0 && (
+                  <div style={{ textAlign:'center', padding:'16px 0', fontSize:13, color:'rgba(255,255,255,0.35)' }}>No tasks yet — add one below</div>
+                )}
+                {tasks.map(task => (
+                  <div key={task.id}
+                    onClick={() => setActiveTaskId(task.id===activeTaskId?null:task.id)}
+                    style={{ display:'flex', alignItems:'center', gap:10, background:activeTaskId===task.id?'rgba(255,255,255,0.1)':'rgba(255,255,255,0.03)', border:activeTaskId===task.id?'1px solid rgba(255,255,255,0.25)':'1px solid rgba(255,255,255,0.06)', borderRadius:10, padding:'10px 12px', marginBottom:6, cursor:'pointer', transition:'all 0.15s' }}>
+                    <input type="checkbox" checked={task.done} onClick={e=>e.stopPropagation()}
+                      onChange={e => setTasks(prev => prev.map(t => t.id===task.id?{...t,done:e.target.checked}:t))}
+                      style={{ width:14, height:14, cursor:'pointer', flexShrink:0, accentColor:'rgba(255,255,255,0.8)' }}/>
+                    <span style={{ flex:1, fontSize:13, fontWeight:500, textDecoration:task.done?'line-through':'none', color:task.done?'rgba(255,255,255,0.3)':'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{task.name}</span>
+                    <div style={{ display:'flex', gap:3, flexShrink:0 }}>
+                      {Array(task.estimatedPomodoros||1).fill(0).map((_,i)=>(
+                        <div key={i} style={{ width:6, height:6, borderRadius:'50%', background:i<(task.completedPomodoros||0)?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.15)' }}/>
+                      ))}
+                    </div>
+                    <button onClick={e=>{e.stopPropagation();setTasks(prev=>prev.filter(t=>t.id!==task.id))}}
+                      style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.25)', fontSize:16, cursor:'pointer', flexShrink:0, padding:'0 2px' }}
+                      onMouseEnter={e=>e.currentTarget.style.color='#fff'}
+                      onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.25)'}>×</button>
+                  </div>
+                ))}
+                <div style={{ border:'1px dashed rgba(255,255,255,0.12)', borderRadius:10, padding:'8px 12px', cursor:'text', background:'rgba(255,255,255,0.02)', marginTop:4 }}
+                  onClick={()=>document.getElementById('pom-task-inp-report')?.focus()}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <span style={{ fontSize:16, color:'rgba(255,255,255,0.25)' }}>＋</span>
+                    <input id="pom-task-inp-report" value={newTask} onChange={e=>setNewTask(e.target.value)}
+                      onKeyDown={e=>{if(e.key==='Enter'&&newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
+                      placeholder="Add task and press Enter"
+                      style={{ flex:1, background:'transparent', border:'none', color:'#fff', fontSize:12, caretColor:'#fff' }}/>
+                  </div>
+                  {newTask && (
+                    <div style={{ display:'flex', gap:8, marginTop:8, alignItems:'center' }}>
+                      <select value={newTaskEst} onChange={e=>setNewTaskEst(+e.target.value)}
+                        style={{ background:'rgba(0,0,0,0.3)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', padding:'3px 6px', borderRadius:6, fontSize:11 }}>
+                        {Array.from({length:10},(_,i)=><option key={i+1} value={i+1}>{i+1} 🍅</option>)}
+                      </select>
+                      <button onClick={()=>{if(newTask.trim()){setTasks(prev=>[...prev,{id:Date.now(),name:newTask.trim(),estimatedPomodoros:newTaskEst,completedPomodoros:0,done:false}]);setNewTask('');setNewTaskEst(1);}}}
+                        style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', padding:'4px 12px', borderRadius:8, fontSize:11, fontWeight:700, cursor:'pointer' }}>Add</button>
+                      <button onClick={()=>setNewTask('')}
+                        style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.12)', color:'rgba(255,255,255,0.4)', padding:'4px 10px', borderRadius:8, fontSize:11, cursor:'pointer' }}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── AI PRODUCTIVITY COACH ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+                  <div style={{ fontSize:18 }}>🧠</div>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>AI Productivity Coach</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:1 }}>Personalised insights based on your session</div>
+                  </div>
+                </div>
+                {coachMessages.map((msg, idx) => (
+                  <div key={idx} style={{ display:'flex', gap:8, marginBottom:8, padding:'10px 12px', background:'rgba(255,255,255,0.05)', borderRadius:10, border:'1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ fontSize:14, flexShrink:0, marginTop:1 }}>
+                      {idx === 0 ? '💡' : idx === 1 ? '⚡' : idx === 2 ? '🏆' : '📈'}
+                    </div>
+                    <div style={{ fontSize:12, color:'rgba(255,255,255,0.75)', lineHeight:1.6 }}>{msg}</div>
+                  </div>
+                ))}
+                {coachMessages.length === 0 && (
+                  <div style={{ textAlign:'center', padding:'16px 0', fontSize:12, color:'rgba(255,255,255,0.3)' }}>
+                    Complete a focus session to get personalised coaching
+                  </div>
+                )}
+              </div>
+
+              {/* ── AI COACH CHAT ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: coachChatOpen ? 12 : 0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <div style={{ fontSize:18 }}>💬</div>
+                    <div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>Ask Your Coach</div>
+                        <span style={{ fontSize:9, background:'rgba(16,185,129,0.2)', border:'1px solid rgba(16,185,129,0.4)', color:'#6ee7b7', padding:'2px 8px', borderRadius:100, fontWeight:700, letterSpacing:0.5, marginLeft:8 }}>AI POWERED</span>
+                      </div>
+                      <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:1 }}>Plan tasks, get motivated, beat procrastination</div>
+                    </div>
+                  </div>
+                  <button onClick={()=>setCoachChatOpen(o=>!o)}
+                    style={{ background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.18)', color:'#fff', borderRadius:100, padding:'6px 14px', fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    {coachChatOpen ? 'Close' : 'Open Chat'}
+                  </button>
+                </div>
+
+                {coachChatOpen && (
+                  <>
+                    <div style={{ maxHeight:280, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:12, paddingRight:4 }}>
+                      {coachMessages2.length === 0 && (
+                        <div style={{ textAlign:'center', padding:'20px 10px', fontSize:12, color:'rgba(255,255,255,0.35)', lineHeight:1.6 }}>
+                          👋 Hi! Tell me what you're working on, your deadline, or how you're feeling — I'll help you plan and stay motivated.
+                        </div>
+                      )}
+                      {coachMessages2.map((m,i) => (
+                        <div key={i} style={{
+                          alignSelf: m.role==='user' ? 'flex-end' : 'flex-start',
+                          maxWidth: '85%',
+                          background: m.role==='user' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)',
+                          border: m.role==='user' ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: 14,
+                          padding: '8px 12px',
+                          fontSize: 12,
+                          color: '#fff',
+                          lineHeight: 1.5,
+                        }}>
+                          {m.text}
+                        </div>
+                      ))}
+                      {coachTyping && (
+                        <div style={{ alignSelf:'flex-start', fontSize:11, color:'rgba(255,255,255,0.4)', padding:'4px 12px' }}>
+                          Thinking...
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display:'flex', gap:8 }}>
+                      <input
+                        value={coachInput}
+                        onChange={e=>setCoachInput(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==='Enter') sendCoachMessage() }}
+                        placeholder="e.g. I have an exam tomorrow, help me plan"
+                        style={{ flex:1, background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:100, color:'#fff', fontSize:12, padding:'9px 16px', caretColor:'#fff' }}
+                      />
+                      <button onClick={sendCoachMessage}
+                        style={{ background:'rgba(255,255,255,0.2)', border:'1px solid rgba(255,255,255,0.3)', color:'#fff', borderRadius:100, padding:'9px 18px', fontSize:12, fontWeight:700, cursor:'pointer', flexShrink:0 }}>
+                        Send
+                      </button>
+                    </div>
+                    {coachMessages2.length > 0 && (
+                      <button onClick={()=>{ setCoachMessages2([]); ls.set('pom_coach_chat',[]) }}
+                        style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.3)', fontSize:10, marginTop:8, cursor:'pointer', padding:0 }}>
+                        Clear conversation
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* ── FOCUS HEATMAP ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                  <div>
+                    <div style={{ fontSize:12, fontWeight:700, color:'#fff' }}>Focus Heatmap</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:2 }}>Last 120 days of focus activity</div>
+                  </div>
+                  {weeklyInsights.bestHour && (
+                    <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', textAlign:'right' }}>
+                      🕐 Peak: <strong style={{color:'#fff'}}>{weeklyInsights.bestHour}:00</strong>
+                      <br/><span style={{fontSize:10}}>{weeklyInsights.focusMinutes}m avg</span>
+                    </div>
+                  )}
+                </div>
+                <HeatmapGrid />
+                <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:10, justifyContent:'flex-end' }}>
+                  <span style={{ fontSize:10, color:'rgba(255,255,255,0.3)' }}>Less</span>
+                  {[0.08,0.25,0.45,0.65,0.9].map(o => (
+                    <div key={o} style={{ width:10, height:10, borderRadius:2, background:`rgba(16,185,129,${o})` }}/>
+                  ))}
+                  <span style={{ fontSize:10, color:'rgba(255,255,255,0.3)' }}>More</span>
+                </div>
+              </div>
+
+              {/* ── RPG LEVEL + BADGES ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>🎮 Level {level} — {playerTitle}</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', marginTop:2 }}>XP: {xp} / {(Math.floor(xp/500)+1)*500}</div>
+                  </div>
+                  <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(255,255,255,0.1)', border:'2px solid rgba(255,255,255,0.2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, fontWeight:800, color:'#fff' }}>
+                    {level}
+                  </div>
+                </div>
+                <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:100, height:6, marginBottom:12 }}>
+                  <div style={{ background:'rgba(255,255,255,0.6)', borderRadius:100, height:6, width:((xp % 500)/500*100)+'%', transition:'width 0.5s' }}/>
+                </div>
+                {badges.length > 0 && (
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                    {badges.map(badge => (
+                      <div key={badge} style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', padding:'5px 10px', borderRadius:20, fontSize:11, color:'#fff' }}>
+                        {badge}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {badges.length === 0 && (
+                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.3)', textAlign:'center', padding:'8px 0' }}>
+                    Complete focus sessions to earn badges
+                  </div>
+                )}
+              </div>
+
+              {/* ── ACTION BUTTONS ── */}
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
+                {[
+                  { l:'🗑 Clear Stats', fn:()=>{ setTimers(p=>p.map(t=>({...t,totalFocusSecs:0,totalBreakSecs:0,cyclesDone:0}))); showToast('Stats cleared') } },
+                  { l:'📊 Export CSV', fn:exportCSV },
+                  { l:'🐦 Share on X', fn:shareX },
+                  { l:'🏆 Leaderboard', fn:()=>{ setShowLeaderboard(true); loadLeaderboard() } },
+                  ...(user ? [{ l:'☁️ Sync', fn:syncToCloud }] : []),
+                ].map(b => (
+                  <button key={b.l} onClick={b.fn}
+                    style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', backdropFilter:'blur(8px)', color:'rgba(255,255,255,0.8)', padding:'9px 16px', borderRadius:100, fontSize:12, fontWeight:600, cursor:'pointer' }}
+                    onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.16)'}
+                    onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.08)'}>
+                    {b.l}
+                  </button>
+                ))}
+              </div>
+
             </div>
           </div>
         )}
