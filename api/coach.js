@@ -51,7 +51,7 @@ Use this data naturally when relevant. Don't recite all the stats back robotical
     // Pass systemInstruction as a proper Content object with role 'system'
     // when CREATING the model, not inside startChat history config.
     const modelWithSystem = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash-lite',
       systemInstruction: {
         role: 'system',
         parts: [{ text: systemContext }],
