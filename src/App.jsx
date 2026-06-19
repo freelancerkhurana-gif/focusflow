@@ -33,12 +33,12 @@ const PHASE_COLORS = {
 }
 
 const NOISE_OPTIONS = [
-  { key: 'white',  label: 'White Noise' },
-  { key: 'pink',   label: 'Pink Noise'  },
-  { key: 'brown',  label: 'Brown Noise' },
-  { key: 'rain',   label: 'Rain'        },
-  { key: 'cafe',   label: 'Café'        },
-  { key: 'forest', label: 'Forest'      },
+  { key: 'white',  label: 'White Noise', pro: false },
+  { key: 'pink',   label: 'Pink Noise',  pro: false },
+  { key: 'brown',  label: 'Brown Noise', pro: true },
+  { key: 'rain',   label: 'Rain',        pro: true },
+  { key: 'cafe',   label: 'Café',        pro: true },
+  { key: 'forest', label: 'Forest',      pro: true },
 ]
 
 const WASH_COLORS = [
@@ -1262,7 +1262,16 @@ export default function App() {
   }
 
   const addTimer = () => {
-    if (timers.length >= 4) { showToast('Maximum 4 timers'); return }
+    const limit = isPro ? 4 : 1
+    if (timers.length >= limit) {
+      if (!isPro) {
+        showToast('Free plan allows 1 timer. Upgrade to Pro for up to 4.')
+        setShowUpgrade(true)
+      } else {
+        showToast('Maximum 4 timers')
+      }
+      return
+    }
     const id  = Date.now()
     const num = timers.length + 1
     const grid = document.querySelector('.timer-grid')
@@ -1385,7 +1394,16 @@ export default function App() {
   }, [])
 
   const addStopwatch = () => {
-    if (stopwatches.length >= 4) { showToast('Maximum 4 stopwatches'); return }
+    const limit = isPro ? 4 : 1
+    if (stopwatches.length >= limit) {
+      if (!isPro) {
+        showToast('Free plan allows 1 stopwatch. Upgrade to Pro for up to 4.')
+        setShowUpgrade(true)
+      } else {
+        showToast('Maximum 4 stopwatches')
+      }
+      return
+    }
     const id = Date.now()
     setStopwatches(prev => [...prev, makeSW(id, prev.length + 1)])
   }
@@ -2259,9 +2277,9 @@ export default function App() {
         {/* Add timer / stopwatch */}
         {(tab==='timer'||tab==='stopwatch') && (
           <button onClick={tab==='timer'?addTimer:addStopwatch}
-            disabled={(tab==='timer'?timers:stopwatches).length>=4}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.8)', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600, backdropFilter: 'blur(8px)', opacity:(tab==='timer'?timers:stopwatches).length>=4?.4:1 }}>
-            + Add {tab==='timer'?'Timer':'Stopwatch'}
+            disabled={(tab==='timer'?timers:stopwatches).length >= (isPro ? 4 : 1)}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.8)', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600, backdropFilter: 'blur(8px)', opacity:(tab==='timer'?timers:stopwatches).length>=(isPro?4:1)?.4:1 }}>
+            + Add {tab==='timer'?'Timer':'Stopwatch'}{!isPro && ' 🔒'}
           </button>
         )}
 
@@ -2389,25 +2407,32 @@ export default function App() {
       }}>
         <h2 style={{ fontWeight:300, fontSize:22, letterSpacing:1, margin:0, color:'#fff' }}>Ambient Noise</h2>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, width:'100%' }}>
-          {NOISE_OPTIONS.map(n => (
-            <button key={n.key} className="noise-btn"
-              onClick={()=>{ setNoiseKey(n.key); setNoiseOn(true) }}
-              style={{
-                background: noiseKey===n.key&&noiseOn ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)',
-                border: `1px solid ${noiseKey===n.key&&noiseOn ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.15)'}`,
-                backdropFilter: 'blur(8px)',
-                color: '#fff',
-                padding: '14px 8px',
-                borderRadius: 12,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all .15s',
-                letterSpacing: 0.3,
-              }}>
-              {n.label}
-            </button>
-          ))}
+          {NOISE_OPTIONS.map(n => {
+            const locked = n.pro && !isPro
+            return (
+              <button key={n.key} className="noise-btn"
+                onClick={()=>{
+                  if (locked) { setShowUpgrade(true); return }
+                  setNoiseKey(n.key); setNoiseOn(true)
+                }}
+                style={{
+                  background: noiseKey===n.key&&noiseOn ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)',
+                  border: `1px solid ${noiseKey===n.key&&noiseOn ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.15)'}`,
+                  backdropFilter: 'blur(8px)',
+                  color: locked ? 'rgba(255,255,255,0.35)' : '#fff',
+                  padding: '14px 8px',
+                  borderRadius: 12,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all .15s',
+                  letterSpacing: 0.3,
+                  position: 'relative',
+                }}>
+                {n.label}{locked && ' 🔒'}
+              </button>
+            )
+          })}
         </div>
         <div style={{ textAlign:'center', width:'100%' }}>
           <div style={{ fontSize:11, color:'rgba(255,255,255,0.55)', letterSpacing:1.5, marginBottom:10 }}>
@@ -2781,10 +2806,10 @@ export default function App() {
               <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
                 {[
                   { l:'🗑 Clear Stats', fn:()=>{ setTimers(p=>p.map(t=>({...t,totalFocusSecs:0,totalBreakSecs:0,cyclesDone:0}))); showToast('Stats cleared') } },
-                  { l:'📊 Export CSV', fn:exportCSV },
+                  { l: isPro ? '📊 Export CSV' : '📊 Export CSV 🔒', fn: isPro ? exportCSV : () => setShowUpgrade(true) },
                   { l:'🐦 Share on X', fn:shareX },
-                  { l:'🏆 Leaderboard', fn:()=>{ setShowLeaderboard(true); loadLeaderboard() } },
-                  ...(user ? [{ l:'☁️ Sync', fn:syncToCloud }] : []),
+                  { l: isPro ? '🏆 Leaderboard' : '🏆 Leaderboard 🔒', fn: isPro ? (()=>{ setShowLeaderboard(true); loadLeaderboard() }) : (()=>setShowUpgrade(true)) },
+                  ...(user ? [{ l: isPro ? '☁️ Sync' : '☁️ Sync 🔒', fn: isPro ? syncToCloud : () => setShowUpgrade(true) }] : []),
                 ].map(b => (
                   <button key={b.l} onClick={b.fn}
                     style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', backdropFilter:'blur(8px)', color:'rgba(255,255,255,0.8)', padding:'9px 16px', borderRadius:100, fontSize:12, fontWeight:600, cursor:'pointer' }}
@@ -2944,9 +2969,16 @@ export default function App() {
             <div style={{ fontSize:52, marginBottom:16 }}>⚡</div>
             <h2 style={{ margin:'0 0 8px', fontSize:24, fontWeight:800 }}>Upgrade to Pro</h2>
             <p style={{ color:'rgba(255,255,255,0.6)', marginBottom:24, fontSize:14, lineHeight:1.65 }}>Unlock cloud sync, leaderboard, and unlimited history</p>
-            {['☁️ Cloud sync across all devices','🏆 Weekly leaderboard','📊 Unlimited focus history','⚡ Priority support'].map(f=>(
-              <div key={f} style={{ fontSize:14, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', textAlign:'left', color:'rgba(255,255,255,0.8)' }}>{f}</div>
-            ))}
+            {[
+                '⏱️ Up to 4 timers & stopwatches',
+                '🧠 Unlimited AI Coach messages',
+                '🎵 All ambient sounds (rain, café, forest)',
+                '☁️ Cloud sync across all devices',
+                '🏆 Weekly leaderboard access',
+                '📊 CSV export of your stats',
+              ].map(f=>(
+                <div key={f} style={{ fontSize:14, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', textAlign:'left', color:'rgba(255,255,255,0.8)' }}>{f}</div>
+              ))}
             <div style={{ fontSize:34, fontWeight:800, margin:'22px 0 4px' }}>$3.99 CAD</div>
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:22 }}>per month · cancel anytime</div>
             <button onClick={startCheckout}
