@@ -2131,6 +2131,65 @@ export default function App() {
                 </svg>
               )}
             </button>
+            {!isPro && (
+              <button
+                onClick={() => setShowUpgrade(true)}
+                style={{
+                  background: 'rgba(255,215,0,0.15)',
+                  border: '1px solid rgba(255,215,0,0.4)',
+                  color: '#FFD700',
+                  padding: '7px 14px',
+                  borderRadius: 100,
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  letterSpacing: 0.3,
+                }}>
+                ⚡ Upgrade
+              </button>
+            )}
+            {isPro && (
+              <span style={{
+                background: 'rgba(255,215,0,0.2)',
+                border: '1px solid rgba(255,215,0,0.4)',
+                color: '#FFD700',
+                padding: '4px 10px',
+                borderRadius: 100,
+                fontSize: 11,
+                fontWeight: 800,
+              }}>
+                PRO ✨
+              </span>
+            )}
+            {!user && (
+              <button onClick={signIn}
+                style={{
+                  background: 'rgba(255,255,255,0.15)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  color: '#fff',
+                  padding: '7px 16px',
+                  borderRadius: 100,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}>
+                Sign In
+              </button>
+            )}
+            {user && (
+              <button onClick={signOut}
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: 'rgba(255,255,255,0.7)',
+                  padding: '7px 14px',
+                  borderRadius: 100,
+                  fontSize: 11,
+                  cursor: 'pointer',
+                }}>
+                Sign Out
+              </button>
+            )}
                         {[
               { icon:'?', tip:'Keyboard Shortcuts', fn:()=>setShowKeyHelp(true) },
             ].map(b => (
