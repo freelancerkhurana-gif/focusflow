@@ -975,11 +975,26 @@ export default function App() {
   const [isPro, setIsPro] = useState(() => ls.get('pom_pro', false))
   const [showUpgrade, setShowUpgrade] = useState(false)
 
+  useEffect(() => {
+    if (!user) { setIsPro(ls.get('pom_pro', false)); return }
+    supabase
+      .from('subscriptions')
+      .select('status')
+      .eq('user_id', user.id)
+      .single()
+      .then(({ data }) => {
+        const active = data?.status === 'active'
+        setIsPro(active)
+        ls.set('pom_pro', active)
+      })
+      .catch(() => {})
+  }, [user])
+
   // ── UI ──
   const [toast, setToast] = useState(null)
   const toastTimer = useRef(null)
   const [showKeyHelp, setShowKeyHelp] = useState(false)
-  const [showOnboard, setShowOnboard] = useState(() => !ls.get('pom_visited', false))
+  const [showOnboard, setShowOnboard] = useState(false)
   const [onboardStep, setOnboardStep] = useState(1)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
   const [vw, setVw] = useState(window.innerWidth)
@@ -1058,6 +1073,30 @@ export default function App() {
     provider: 'google', options: { redirectTo: window.location.origin }
   })
   const signOut = () => { supabase.auth.signOut(); setUser(null) }
+
+  const startCheckout = async () => {
+    if (!user) {
+      showToast('Please sign in first to upgrade')
+      signIn()
+      return
+    }
+    try {
+      const response = await fetch('/api/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, email: user.email }),
+      })
+      const data = await response.json()
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        showToast('Could not start checkout. Try again.')
+      }
+    } catch (err) {
+      console.error('Checkout error:', err)
+      showToast('Could not start checkout. Try again.')
+    }
+  }
 
   const upsertProfile = async (u) => {
     await supabase.from('profiles').upsert({
@@ -1565,6 +1604,27 @@ export default function App() {
   const sendCoachMessage = async () => {
     const trimmed = coachInput.trim()
     if (!trimmed) return
+
+    // Free tier limit: 5 messages per day for non-Pro users
+    if (!isPro) {
+      const today = new Date().toDateString()
+      const usage = ls.get('pom_coach_usage', { date: today, count: 0 })
+      if (usage.date !== today) {
+        usage.date = today
+        usage.count = 0
+      }
+      if (usage.count >= 5) {
+        setCoachMessages2(prev => [...prev, {
+          role: 'coach',
+          text: "You've used your 5 free coach messages for today. Upgrade to Pro for unlimited coaching, cloud sync, and more.",
+          ts: Date.now(),
+        }])
+        setShowUpgrade(true)
+        return
+      }
+      usage.count += 1
+      ls.set('pom_coach_usage', usage)
+    }
     const userEntry = { role:'user', text:trimmed, ts:Date.now() }
     setCoachMessages2(prev => [...prev, userEntry])
     setCoachInput('')
@@ -2072,7 +2132,6 @@ export default function App() {
               )}
             </button>
                         {[
-              { icon:'🖥', tip:'Color Wash Mode', fn: openWashMode },
               { icon:'?', tip:'Keyboard Shortcuts', fn:()=>setShowKeyHelp(true) },
             ].map(b => (
               <button key={b.icon} className="icon-btn" onClick={b.fn} title={b.tip}
@@ -2552,30 +2611,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ── AI PRODUCTIVITY COACH ── */}
-              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
-                  <div style={{ fontSize:18 }}>🧠</div>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>AI Productivity Coach</div>
-                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:1 }}>Personalised insights based on your session</div>
-                  </div>
-                </div>
-                {coachMessages.map((msg, idx) => (
-                  <div key={idx} style={{ display:'flex', gap:8, marginBottom:8, padding:'10px 12px', background:'rgba(255,255,255,0.05)', borderRadius:10, border:'1px solid rgba(255,255,255,0.08)' }}>
-                    <div style={{ fontSize:14, flexShrink:0, marginTop:1 }}>
-                      {idx === 0 ? '💡' : idx === 1 ? '⚡' : idx === 2 ? '🏆' : '📈'}
-                    </div>
-                    <div style={{ fontSize:12, color:'rgba(255,255,255,0.75)', lineHeight:1.6 }}>{msg}</div>
-                  </div>
-                ))}
-                {coachMessages.length === 0 && (
-                  <div style={{ textAlign:'center', padding:'16px 0', fontSize:12, color:'rgba(255,255,255,0.3)' }}>
-                    Complete a focus session to get personalised coaching
-                  </div>
-                )}
-              </div>
-
+              
               {/* ── AI COACH CHAT ── */}
               <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: coachChatOpen ? 12 : 0 }}>
@@ -2585,6 +2621,16 @@ export default function App() {
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                         <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>Ask Your Coach</div>
                         <span style={{ fontSize:9, background:'rgba(16,185,129,0.2)', border:'1px solid rgba(16,185,129,0.4)', color:'#6ee7b7', padding:'2px 8px', borderRadius:100, fontWeight:700, letterSpacing:0.5, marginLeft:8 }}>AI POWERED</span>
+                        {!isPro && (() => {
+                          const today = new Date().toDateString()
+                          const usage = ls.get('pom_coach_usage', { date: today, count: 0 })
+                          const remaining = usage.date === today ? Math.max(0, 5 - usage.count) : 5
+                          return (
+                            <span style={{ fontSize:9, color:'rgba(255,255,255,0.4)', marginLeft:8 }}>
+                              {remaining}/5 free today
+                            </span>
+                          )
+                        })()}
                       </div>
                       <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:1 }}>Plan tasks, get motivated, beat procrastination</div>
                     </div>
@@ -2671,36 +2717,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ── RPG LEVEL + BADGES ── */}
-              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>🎮 Level {level} — {playerTitle}</div>
-                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)', marginTop:2 }}>XP: {xp} / {(Math.floor(xp/500)+1)*500}</div>
-                  </div>
-                  <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(255,255,255,0.1)', border:'2px solid rgba(255,255,255,0.2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, fontWeight:800, color:'#fff' }}>
-                    {level}
-                  </div>
-                </div>
-                <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:100, height:6, marginBottom:12 }}>
-                  <div style={{ background:'rgba(255,255,255,0.6)', borderRadius:100, height:6, width:((xp % 500)/500*100)+'%', transition:'width 0.5s' }}/>
-                </div>
-                {badges.length > 0 && (
-                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                    {badges.map(badge => (
-                      <div key={badge} style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', padding:'5px 10px', borderRadius:20, fontSize:11, color:'#fff' }}>
-                        {badge}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {badges.length === 0 && (
-                  <div style={{ fontSize:11, color:'rgba(255,255,255,0.3)', textAlign:'center', padding:'8px 0' }}>
-                    Complete focus sessions to earn badges
-                  </div>
-                )}
-              </div>
-
+              
               {/* ── ACTION BUTTONS ── */}
               <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
                 {[
@@ -2871,11 +2888,11 @@ export default function App() {
             {['☁️ Cloud sync across all devices','🏆 Weekly leaderboard','📊 Unlimited focus history','⚡ Priority support'].map(f=>(
               <div key={f} style={{ fontSize:14, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', textAlign:'left', color:'rgba(255,255,255,0.8)' }}>{f}</div>
             ))}
-            <div style={{ fontSize:34, fontWeight:800, margin:'22px 0 4px' }}>$4.99</div>
+            <div style={{ fontSize:34, fontWeight:800, margin:'22px 0 4px' }}>$3.99 CAD</div>
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:22 }}>per month · cancel anytime</div>
-            <button onClick={()=>window.open('https://buy.stripe.com/test_bJe00j01mcZk6JOeMH8k800','_blank')}
+            <button onClick={startCheckout}
               style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:15, borderRadius:12, fontSize:16, fontWeight:800, marginBottom:10 }}>
-              Start Pro - $4.99/mo
+              Start Pro - $3.99 CAD/mo
             </button>
             <button onClick={()=>setShowUpgrade(false)}
               style={{ width:'100%', background:'transparent', border:'1px solid rgba(255,255,255,0.18)', color:'rgba(255,255,255,0.55)', padding:12, borderRadius:12, fontSize:14 }}>
