@@ -504,6 +504,7 @@ function TimerCard({
   settings, editingId, editName, setEditingId, setEditName,
   updateTimerField, adjustTimer, toggleTimer, resetTimer,
   changeTimerPhase, setTimerMode, setTasks, removeTimer, setTimers,
+  setDistractionTimerId, setShowDistractionLog,
 }) {
   const isLarge  = count === 1
   const isMed    = count === 2
@@ -841,6 +842,49 @@ function TimerCard({
           )
         })}
       </div>
+      <div style={{ display:'flex', justifyContent:'center', marginTop:6 }}>
+        <button
+          onClick={() => {
+            if (timer.running) return
+            updateTimerField(timer.id, 'secsLeft', 120)
+            updateTimerField(timer.id, 'totalSecs', 120)
+            toggleTimer(timer.id)
+          }}
+          disabled={timer.running}
+          style={{
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            color: 'rgba(255,255,255,0.6)',
+            padding: '4px 14px',
+            borderRadius: 100,
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: timer.running ? 'not-allowed' : 'pointer',
+            opacity: timer.running ? 0.35 : 1,
+            letterSpacing: 0.3,
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={e => { if (!timer.running) e.currentTarget.style.background = 'rgba(255,255,255,0.14)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}>
+          ⚡ Just 2 minutes — start now
+        </button>
+      </div>
+      {timer.running && (
+        <button
+          onClick={() => { setDistractionTimerId(timer.id); setShowDistractionLog(true) }}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'rgba(255,255,255,0.35)',
+            fontSize: 10,
+            marginTop: 4,
+            cursor: 'pointer',
+            padding: 0,
+            textDecoration: 'underline',
+          }}>
+          Got distracted?
+        </button>
+      )}
       </div>
 
             </div>
@@ -974,6 +1018,14 @@ export default function App() {
   // ── PRO ──
   const [isPro, setIsPro] = useState(() => ls.get('pom_pro', false))
   const [showUpgrade, setShowUpgrade] = useState(false)
+  const [activeFocusCount, setActiveFocusCount] = useState(0)
+  const sessionIdRef = useRef(
+    ls.get('pom_session_id', null) || (() => {
+      const id = 'sess_' + Math.random().toString(36).slice(2) + Date.now()
+      ls.set('pom_session_id', id)
+      return id
+    })()
+  )
 
   useEffect(() => {
     if (!user) { setIsPro(ls.get('pom_pro', false)); return }
@@ -990,12 +1042,50 @@ export default function App() {
       .catch(() => {})
   }, [user])
 
+  useEffect(() => {
+    const anyRunning = (timers || []).some(t => t.running)
+
+    const pingPresence = async () => {
+      if (!anyRunning) return
+      try {
+        await supabase.from('active_sessions').upsert({
+          session_id: sessionIdRef.current,
+          last_seen: new Date().toISOString(),
+        }, { onConflict: 'session_id' })
+      } catch {}
+    }
+
+    const fetchCount = async () => {
+      try {
+        const cutoff = new Date(Date.now() - 90 * 1000).toISOString()
+        const { count } = await supabase
+          .from('active_sessions')
+          .select('*', { count: 'exact', head: true })
+          .gte('last_seen', cutoff)
+        setActiveFocusCount(count || 0)
+      } catch {}
+    }
+
+    pingPresence()
+    fetchCount()
+
+    const interval = setInterval(() => {
+      pingPresence()
+      fetchCount()
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [timers])
+
   // ── UI ──
   const [toast, setToast] = useState(null)
   const toastTimer = useRef(null)
   const [showKeyHelp, setShowKeyHelp] = useState(false)
   const [showOnboard, setShowOnboard] = useState(false)
   const [onboardStep, setOnboardStep] = useState(1)
+  const [showDistractionLog, setShowDistractionLog] = useState(false)
+  const [distractionTimerId, setDistractionTimerId] = useState(null)
+  const [customDistraction, setCustomDistraction] = useState('')
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
   const [vw, setVw] = useState(window.innerWidth)
   const [installPrompt, setInstallPrompt] = useState(null)
@@ -1096,6 +1186,12 @@ export default function App() {
       console.error('Checkout error:', err)
       showToast('Could not start checkout. Try again.')
     }
+  }
+
+  const logDistraction = (reason) => {
+    addDistraction(reason, setDistractions, showToast)
+    setShowDistractionLog(false)
+    setCustomDistraction('')
   }
 
   const upsertProfile = async (u) => {
@@ -1507,6 +1603,7 @@ export default function App() {
   useEffect(() => { ls.set('pom_settings', settings) }, [settings])
   useEffect(() => { ls.set('pom_note', note) }, [note])
   useEffect(() => { ls.set('pom_coach_chat', coachMessages2) }, [coachMessages2])
+  useEffect(() => { ls.set('pom_distractions', distractions) }, [distractions])
   useEffect(() => {
     localStorage.setItem('pom_theme_dark', JSON.stringify(isDark))
   }, [isDark])
@@ -2216,6 +2313,24 @@ export default function App() {
                 {b.icon}
               </button>
             ))}
+            {activeFocusCount > 0 && (
+              <span style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'rgba(255,255,255,0.55)',
+                letterSpacing: 0.3,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: '#4ade80',
+                  boxShadow: '0 0 6px #4ade80',
+                }}/>
+                {activeFocusCount} focusing now
+              </span>
+            )}
             {streak > 0 && (
               <span style={{
                 fontSize: 13,
@@ -2374,6 +2489,8 @@ export default function App() {
                     setTasks={setTasks}
                     removeTimer={removeTimer}
                     setTimers={setTimers}
+                    setDistractionTimerId={setDistractionTimerId}
+                    setShowDistractionLog={setShowDistractionLog}
                   />
                   </div>
                 </div>
@@ -2560,6 +2677,19 @@ export default function App() {
               <div style={{ fontSize:13, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:4 }}>Daily Report</div>
               <div style={{ fontSize:11, color:'rgba(255,255,255,0.3)', letterSpacing:1 }}>{new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</div>
             </div>
+            {activeFocusCount > 0 && (
+              <div style={{ textAlign:'center', marginBottom:16 }}>
+                <span style={{
+                  fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.6)',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(255,255,255,0.06)', padding: '6px 14px',
+                  borderRadius: 100, border: '1px solid rgba(255,255,255,0.1)',
+                }}>
+                  <span style={{ width:7, height:7, borderRadius:'50%', background:'#4ade80', boxShadow:'0 0 8px #4ade80' }}/>
+                  {activeFocusCount} {activeFocusCount === 1 ? 'person' : 'people'} focusing right now around the world
+                </span>
+              </div>
+            )}
 
             <div style={{ maxWidth:700, margin:'0 auto', display:'flex', flexDirection:'column', gap:16 }}>
 
@@ -2801,6 +2931,36 @@ export default function App() {
                 </div>
               </div>
 
+              {/* ── DISTRACTION PATTERNS ── */}
+              {distractions.length > 0 && (
+                <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                  <div style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:4 }}>Distraction Patterns</div>
+                  <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginBottom:12 }}>{distractions.length} logged — see what pulls you away most</div>
+                  {(() => {
+                    const counts = {}
+                    distractions.forEach(d => { counts[d.reason] = (counts[d.reason] || 0) + 1 })
+                    const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 5)
+                    const maxCount = sorted[0]?.[1] || 1
+                    return sorted.map(([reason, count]) => (
+                      <div key={reason} style={{ marginBottom:8 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#fff', marginBottom:3 }}>
+                          <span>{reason}</span>
+                          <span style={{ color:'rgba(255,255,255,0.5)' }}>{count}×</span>
+                        </div>
+                        <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:100, height:5 }}>
+                          <div style={{ background:'rgba(255,255,255,0.5)', borderRadius:100, height:5, width:(count/maxCount*100)+'%', transition:'width 0.5s' }}/>
+                        </div>
+                      </div>
+                    ))
+                  })()}
+                  <button
+                    onClick={() => { setDistractions([]); ls.set('pom_distractions', []); showToast('Distraction log cleared') }}
+                    style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.3)', fontSize:10, marginTop:6, cursor:'pointer', padding:0 }}>
+                    Clear log
+                  </button>
+                </div>
+              )}
+
               
               {/* ── ACTION BUTTONS ── */}
               <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
@@ -2938,6 +3098,43 @@ export default function App() {
                 Submit My Score
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ DISTRACTION LOG MODAL ══════════════════════════════════ */}
+      {showDistractionLog && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={()=>setShowDistractionLog(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:28, width:'90%', maxWidth:360, color:'#fff' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+              <h2 style={{ margin:0, fontSize:16, fontWeight:800 }}>What pulled you away?</h2>
+              <button onClick={()=>setShowDistractionLog(false)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', fontSize:22, lineHeight:1, cursor:'pointer' }}>×</button>
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:14 }}>
+              {['📱 Phone', '💬 Message', '🌐 Browsing', '🧠 Random thought', '🗣️ Someone talked to me', '😴 Low energy'].map(reason => (
+                <button key={reason} onClick={() => logDistraction(reason)}
+                  style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', color:'#fff', padding:'8px 14px', borderRadius:100, fontSize:13, cursor:'pointer' }}
+                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.16)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.08)'}>
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <input
+                value={customDistraction}
+                onChange={e=>setCustomDistraction(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter' && customDistraction.trim()) logDistraction(customDistraction.trim()) }}
+                placeholder="Something else..."
+                style={{ flex:1, background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, color:'#fff', fontSize:13, padding:'8px 12px', caretColor:'#fff' }}
+              />
+              <button
+                onClick={() => { if (customDistraction.trim()) logDistraction(customDistraction.trim()) }}
+                style={{ background:'rgba(255,255,255,0.15)', border:'none', color:'#fff', borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                Log
+              </button>
+            </div>
           </div>
         </div>
       )}
