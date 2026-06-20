@@ -855,9 +855,9 @@ function TimerCard({
             background: 'rgba(255,255,255,0.06)',
             border: '1px solid rgba(255,255,255,0.15)',
             color: 'rgba(255,255,255,0.6)',
-            padding: '4px 14px',
+            padding: '6px 21px',
             borderRadius: 100,
-            fontSize: 10,
+            fontSize: 15,
             fontWeight: 600,
             cursor: timer.running ? 'not-allowed' : 'pointer',
             opacity: timer.running ? 0.35 : 1,
@@ -1028,7 +1028,11 @@ export default function App() {
   )
 
   useEffect(() => {
-    if (!user) { setIsPro(ls.get('pom_pro', false)); return }
+    if (!user) {
+      setIsPro(false)
+      ls.set('pom_pro', false)
+      return
+    }
     supabase
       .from('subscriptions')
       .select('status')
@@ -1039,7 +1043,10 @@ export default function App() {
         setIsPro(active)
         ls.set('pom_pro', active)
       })
-      .catch(() => {})
+      .catch(() => {
+        setIsPro(false)
+        ls.set('pom_pro', false)
+      })
   }, [user])
 
   useEffect(() => {
@@ -1162,7 +1169,12 @@ export default function App() {
   const signIn = () => supabase.auth.signInWithOAuth({
     provider: 'google', options: { redirectTo: window.location.origin }
   })
-  const signOut = () => { supabase.auth.signOut(); setUser(null) }
+  const signOut = () => {
+    supabase.auth.signOut()
+    setUser(null)
+    setIsPro(false)
+    ls.set('pom_pro', false)
+  }
 
   const startCheckout = async () => {
     if (!user) {
