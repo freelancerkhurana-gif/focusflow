@@ -1176,6 +1176,11 @@ export default function App() {
     const saved = localStorage.getItem('pom_theme_dark')
     return saved !== null ? JSON.parse(saved) : false
   })
+  const [loadedBgImages, setLoadedBgImages] = useState(() => new Set([currentBgImage]))
+
+  useEffect(() => {
+    setLoadedBgImages(prev => new Set([...prev, currentBgImage]))
+  }, [currentBgImage])
   const bgColor = isDark ? '#0a0a0a' : 'transparent'
   const accentColor = isDark ? '#1a1a1a' : bgColor
   const currentBgImage = isDark
@@ -2348,7 +2353,7 @@ export default function App() {
             height: '100%',
             zIndex: 0,
             pointerEvents: 'none',
-            backgroundImage: `url('${img}')`,
+            backgroundImage: loadedBgImages.has(img) ? `url('${img}')` : 'none',
             backgroundSize: 'cover',
             backgroundPosition: 'center center',
             backgroundRepeat: 'no-repeat',

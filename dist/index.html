@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Pomodoros.io – Free Multi Timer | Focus, Work & Study Timer</title>
-    <meta name="description" content="Pomodoros.io is a free multi-timer Pomodoro app with up to 4 simultaneous timers, ambient music, focus mode, stopwatch, tasks, and AI productivity insights. No login required." />
+    <title>Pomodoro Timer - Free Online Focus Timer for Study & Work | Pomodoros.io</title>
+    <meta name="description" content="Free online Pomodoro timer with up to 4 simultaneous timers, ambient focus music, AI coaching, and productivity tracking. Beat procrastination and get more done. No signup required to start." />
     <meta name="keywords" content="pomodoro timer, focus timer, study timer, work timer, free pomodoro, multi timer, productivity timer, pomodoro technique, pomodoros, focus mode, lofi timer" />
     <meta name="author" content="Pomodoros.io" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
@@ -44,6 +44,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="preload" as="image" href="/light_mode_work.png" />
 
     <!-- JSON-LD Structured Data for Google + AI -->
     <script type="application/ld+json">
@@ -81,46 +82,98 @@
     </script>
 
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "What is Pomodoros.io?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Pomodoros.io is a free Pomodoro timer web app that lets you run up to 4 independent timers simultaneously. It includes ambient focus music, a focus mode, stopwatch, tasks, and AI productivity insights."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Is Pomodoros.io free?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes, Pomodoros.io is completely free to use. No login or account required."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How many timers can I run at once?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "You can run up to 4 independent Pomodoro timers simultaneously, each with their own work and break settings."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is the Pomodoro technique?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "The Pomodoro technique is a time management method where you work for 25 minutes then take a 5 minute break. After 4 cycles you take a longer break. Pomodoros.io supports custom presets of 25/5, 30/10, and 45/15 minutes."
-          }
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is the Pomodoro Technique?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "The Pomodoro Technique is a time management method that breaks work into focused intervals, traditionally 25 minutes, separated by short breaks. After four intervals, you take a longer break. It helps reduce procrastination and mental fatigue by making large tasks feel more manageable."
         }
-      ]
-    }
-    </script>
-    <script type="module" crossorigin src="/assets/index-CaqRJEO4.js"></script>
+      },
+      {
+        "@type": "Question",
+        "name": "How many Pomodoros should I do per day?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Most people aim for 6 to 12 Pomodoro sessions per day, depending on workload and focus capacity. Quality of focus matters more than quantity, so starting with 4 to 6 sessions and adjusting based on energy levels is a reasonable approach."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is Pomodoros.io free to use?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes, Pomodoros.io is free to use with one timer, one stopwatch, limited ambient sounds, and a daily allowance of AI coaching messages. A paid Pro plan unlocks up to 4 simultaneous timers, unlimited AI coaching, cloud sync, and all ambient sounds."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I run multiple Pomodoro timers at once?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes, Pomodoros.io supports running up to 4 independent Pomodoro timers simultaneously, each with its own work and break settings, useful for tracking multiple tasks or projects in parallel."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is the best Pomodoro timer length?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "The classic Pomodoro length is 25 minutes of work followed by a 5 minute break. Pomodoros.io also supports 30/10 and 45/15 minute presets for people who focus better in longer blocks."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does Pomodoros.io work for ADHD or focus difficulties?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Pomodoros.io includes features that help with task initiation and sustained focus, including a 2-minute quick-start option, distraction logging, ambient noise, and an AI coach that gives concrete next steps rather than generic encouragement."
+        }
+      }
+    ]
+  }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "How to Use the Pomodoro Technique",
+    "description": "A step by step guide to using the Pomodoro Technique to improve focus and productivity.",
+    "step": [
+      {
+        "@type": "HowToStep",
+        "name": "Choose a task",
+        "text": "Pick one specific task you want to focus on."
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Set a timer for 25 minutes",
+        "text": "Start a focused work session using a 25 minute timer, avoiding all distractions."
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Work until the timer rings",
+        "text": "Work on the task without interruption until the session ends."
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Take a 5 minute break",
+        "text": "Step away from the task for a short break to rest your mind."
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Repeat and take a longer break every 4 sessions",
+        "text": "After completing four work sessions, take a longer 15 to 30 minute break before starting the cycle again."
+      }
+    ]
+  }
+  </script>
+    <script type="module" crossorigin src="/assets/index-C8khyLbg.js"></script>
   </head>
   <body>
     <!-- Pre-hydration semantic markup for Google and AI crawlers -->
