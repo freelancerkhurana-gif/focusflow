@@ -2190,15 +2190,19 @@ export default function App() {
         <div style={{ height: 58, flexShrink: 0, padding: '0 20px', background: 'transparent', backdropFilter: 'none', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Logo */}
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <span className="header-logo" style={{
-    fontFamily: "'Caveat', cursive",
-    fontSize: 36,
-    fontWeight: 700,
-    color: '#fff',
-    userSelect: 'none',
-    letterSpacing: 0.5,
-    textShadow: '0 2px 12px rgba(0,0,0,0.3)',
-  }}>
+            <span
+    onClick={() => { setTab('timer'); setFocusMode(false) }}
+    className="header-logo"
+    style={{
+      fontFamily: "'Caveat', cursive",
+      fontSize: 36,
+      fontWeight: 700,
+      color: '#fff',
+      userSelect: 'none',
+      letterSpacing: 0.5,
+      textShadow: '0 2px 12px rgba(0,0,0,0.3)',
+      cursor: 'pointer',
+    }}>
     pomodoros<span style={{
       color: 'rgba(255,255,255,0.7)',
       fontWeight: 500,
@@ -2980,7 +2984,6 @@ export default function App() {
                   { l:'🗑 Clear Stats', fn:()=>{ setTimers(p=>p.map(t=>({...t,totalFocusSecs:0,totalBreakSecs:0,cyclesDone:0}))); showToast('Stats cleared') } },
                   { l: isPro ? '📊 Export CSV' : '📊 Export CSV 🔒', fn: isPro ? exportCSV : () => setShowUpgrade(true) },
                   { l:'🐦 Share on X', fn:shareX },
-                  { l: isPro ? '🏆 Leaderboard' : '🏆 Leaderboard 🔒', fn: isPro ? (()=>{ setShowLeaderboard(true); loadLeaderboard() }) : (()=>setShowUpgrade(true)) },
                   ...(user ? [{ l: isPro ? '☁️ Sync' : '☁️ Sync 🔒', fn: isPro ? syncToCloud : () => setShowUpgrade(true) }] : []),
                 ].map(b => (
                   <button key={b.l} onClick={b.fn}
@@ -3072,48 +3075,7 @@ export default function App() {
         </div>
       )}
 
-      {/* ══ LEADERBOARD ══════════════════════════════════════════════════════════ */}
-      {showLeaderboard && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
-          onClick={()=>setShowLeaderboard(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:32, width:'90%', maxWidth:480, maxHeight:'75vh', overflowY:'auto', color:'#fff' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
-              <h2 style={{ margin:0, fontSize:20, fontWeight:800 }}>🏆 Weekly Leaderboard</h2>
-              <button onClick={()=>setShowLeaderboard(false)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', fontSize:24, lineHeight:1 }}>×</button>
-            </div>
-
-            {!user && (
-              <div style={{ background:'rgba(255,255,255,0.07)', borderRadius:10, padding:16, marginBottom:16, textAlign:'center' }}>
-                <p style={{ marginBottom:12, color:'rgba(255,255,255,0.7)', fontSize:14 }}>Sign in to join the leaderboard and compete globally</p>
-                <button onClick={signIn} style={{ background:bgColor, border:'none', color:'#fff', padding:'10px 24px', borderRadius:8, fontSize:14, fontWeight:700 }}>Sign In with Google</button>
-              </div>
-            )}
-
-            {lbLoading ? (
-              <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.5)' }}>Loading...</div>
-            ) : leaderboard.length === 0 ? (
-              <div style={{ textAlign:'center', padding:40, color:'rgba(255,255,255,0.5)' }}>No sessions this week yet - be the first!</div>
-            ) : leaderboard.map((e,i)=>(
-              <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 10px', borderBottom:'1px solid rgba(255,255,255,0.07)', borderRadius:8, marginBottom:4, background:i<3?'rgba(255,255,255,0.04)':'transparent' }}>
-                <div style={{ width:30, textAlign:'center', fontSize:i<3?20:14 }}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</div>
-                {e.avatar_url && <img src={e.avatar_url} alt="" style={{ width:32, height:32, borderRadius:'50%' }}/>}
-                <div style={{ flex:1, fontSize:14, fontWeight:700 }}>{e.username||'Anonymous'}</div>
-                <div style={{ fontSize:14, fontWeight:800, fontVariantNumeric:'tabular-nums' }}>
-                  {Math.floor(e.total_focus_seconds/3600)}h {Math.floor((e.total_focus_seconds%3600)/60)}m
-                </div>
-              </div>
-            ))}
-
-            {user && (
-              <button onClick={()=>{syncToCloud();setShowLeaderboard(false)}}
-                style={{ width:'100%', marginTop:16, background:bgColor, border:'none', color:'#fff', padding:13, borderRadius:10, fontSize:14, fontWeight:800 }}>
-                Submit My Score
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
+      
       {/* ══ DISTRACTION LOG MODAL ══════════════════════════════════ */}
       {showDistractionLog && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
@@ -3177,13 +3139,12 @@ export default function App() {
           <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:22, padding:40, width:'90%', maxWidth:400, color:'#fff', textAlign:'center' }}>
             <div style={{ fontSize:52, marginBottom:16 }}>⚡</div>
             <h2 style={{ margin:'0 0 8px', fontSize:24, fontWeight:800 }}>Upgrade to Pro</h2>
-            <p style={{ color:'rgba(255,255,255,0.6)', marginBottom:24, fontSize:14, lineHeight:1.65 }}>Unlock cloud sync, leaderboard, and unlimited history</p>
+            <p style={{ color:'rgba(255,255,255,0.6)', marginBottom:24, fontSize:14, lineHeight:1.65 }}>Unlock cloud sync and unlimited history</p>
             {[
                 '⏱️ Up to 4 timers & stopwatches',
                 '🧠 Unlimited AI Coach messages',
                 '🎵 All ambient sounds (rain, café, forest)',
                 '☁️ Cloud sync across all devices',
-                '🏆 Weekly leaderboard access',
                 '📊 CSV export of your stats',
               ].map(f=>(
                 <div key={f} style={{ fontSize:14, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', textAlign:'left', color:'rgba(255,255,255,0.8)' }}>{f}</div>
@@ -3209,19 +3170,19 @@ export default function App() {
             {onboardStep===1&&(<>
               <div style={{ fontSize:64, marginBottom:20 }}>🍅</div>
               <h2 style={{ fontSize:22, fontWeight:800, marginBottom:12 }}>Welcome to Pomodoros.io</h2>
-              <p style={{ color:'rgba(255,255,255,0.65)', fontSize:14, lineHeight:1.7 }}>The only Pomodoro timer with up to <strong>4 simultaneous timers</strong>, Supabase leaderboard, AI insights, stopwatch, ambient noise and more. All free.</p>
+              <p style={{ color:'rgba(255,255,255,0.65)', fontSize:14, lineHeight:1.7 }}>The only Pomodoro timer with up to <strong>4 simultaneous timers</strong>, AI insights, stopwatch, ambient noise and more. All free.</p>
             </>)}
             {onboardStep===2&&(<>
               <div style={{ fontSize:64, marginBottom:20 }}>🎯</div>
               <h2 style={{ fontSize:22, fontWeight:800, marginBottom:16 }}>How it works</h2>
-              {['Add your tasks below the timer','Hit START for a 25-min focus session','Take a break when the alarm rings','After 4 cycles, earn a long break','Sign in to join the global leaderboard'].map((s,i)=>(
+              {['Add your tasks below the timer','Hit START for a 25-min focus session','Take a break when the alarm rings','After 4 cycles, earn a long break','Sign in to sync your stats'].map((s,i)=>(
                 <div key={i} style={{ fontSize:13, padding:'8px 0', borderBottom:'1px solid rgba(255,255,255,0.08)', textAlign:'left', color:'rgba(255,255,255,0.75)' }}>{i+1}. {s}</div>
               ))}
             </>)}
             {onboardStep===3&&(<>
               <div style={{ fontSize:64, marginBottom:20 }}>🏆</div>
-              <h2 style={{ fontSize:22, fontWeight:800, marginBottom:12 }}>Compete globally</h2>
-              <p style={{ color:'rgba(255,255,255,0.65)', fontSize:14, lineHeight:1.7, marginBottom:20 }}>Sign in with Google to sync your focus stats and appear on the weekly leaderboard. See how you rank against focused workers worldwide.</p>
+              <h2 style={{ fontSize:22, fontWeight:800, marginBottom:12 }}>Sync your progress</h2>
+              <p style={{ color:'rgba(255,255,255,0.65)', fontSize:14, lineHeight:1.7, marginBottom:20 }}>Sign in with Google to sync your focus stats across devices and keep your productivity data safe.</p>
               <button onClick={signIn} style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:13, borderRadius:10, fontSize:15, fontWeight:800, marginBottom:10 }}>Sign In with Google</button>
             </>)}
             <div style={{ display:'flex', gap:12, justifyContent:'center', marginTop:22 }}>
