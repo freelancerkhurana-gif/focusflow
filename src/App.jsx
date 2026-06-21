@@ -2604,9 +2604,28 @@ export default function App() {
 
         {/* Add timer / stopwatch */}
         {(tab==='timer'||tab==='stopwatch') && (
-          <button onClick={tab==='timer'?addTimer:addStopwatch}
-            disabled={(tab==='timer'?timers:stopwatches).length >= (isPro ? 4 : 1)}
-            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.8)', padding:'6px 13px', borderRadius:100, fontSize:12, fontWeight:600, backdropFilter: 'blur(8px)', opacity:(tab==='timer'?timers:stopwatches).length>=(isPro?4:1)?.4:1 }}>
+          <button
+            onClick={() => {
+              const list = tab === 'timer' ? timers : stopwatches
+              const limit = isPro ? 4 : 1
+              if (list.length >= limit) {
+                setShowUpgrade(true)
+                return
+              }
+              if (tab === 'timer') addTimer()
+              else addStopwatch()
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              color: 'rgba(255,255,255,0.8)',
+              padding: '6px 13px',
+              borderRadius: 100,
+              fontSize: 12,
+              fontWeight: 600,
+              backdropFilter: 'blur(8px)',
+              cursor: 'pointer',
+            }}>
             + Add {tab==='timer'?'Timer':'Stopwatch'}{!isPro && ' 🔒'}
           </button>
         )}
