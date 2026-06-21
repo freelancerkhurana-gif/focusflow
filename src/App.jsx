@@ -1008,6 +1008,12 @@ export default function App() {
 
   // ── STREAK ──
   const [streak, setStreak] = useState(() => ls.get('pom_streak', 0))
+  const streakFreezesLeft = (() => {
+    const thisMonth = new Date().toISOString().slice(0,7)
+    const freezeData = ls.get('pom_streak_freezes', { month: thisMonth, used: 0 })
+    if (freezeData.month !== thisMonth) return 2
+    return Math.max(0, 2 - freezeData.used)
+  })()
 
   // ── SUPABASE AUTH ──
   const [user, setUser] = useState(null)
@@ -1110,6 +1116,10 @@ export default function App() {
   const [coachInput, setCoachInput] = useState('')
   const [coachTyping, setCoachTyping] = useState(false)
 
+  // ── MOOD TRACKING ──
+  const [sessionMoods, setSessionMoods] = useState(() => ls.get('pom_session_moods', []))
+  const [showMoodPrompt, setShowMoodPrompt] = useState(null) // holds timer id or null
+
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem('pom_theme_dark')
@@ -1206,6 +1216,11 @@ export default function App() {
     setCustomDistraction('')
   }
 
+  const logSessionMood = (mood) => {
+    setSessionMoods(prev => [...prev, { mood, ts: Date.now() }])
+    setShowMoodPrompt(null)
+  }
+
   const upsertProfile = async (u) => {
     await supabase.from('profiles').upsert({
       id: u.id,
@@ -1260,12 +1275,44 @@ export default function App() {
     const today = new Date().toDateString()
     const lastDate = ls.get('pom_lastDate', '')
     if (lastDate === today) return
+
     const yest = new Date(Date.now() - 86400000).toDateString()
-    const next = lastDate === yest ? streak + 1 : 1
+    const twoDaysAgo = new Date(Date.now() - 2*86400000).toDateString()
+
+    const thisMonth = new Date().toISOString().slice(0,7)
+    let freezeData = ls.get('pom_streak_freezes', { month: thisMonth, used: 0 })
+    if (freezeData.month !== thisMonth) freezeData = { month: thisMonth, used: 0 }
+    const freezesAvailable = Math.max(0, 2 - freezeData.used)
+
+    let next
+    let usedFreeze = false
+
+    if (lastDate === yest) {
+      // consecutive day, normal increment
+      next = streak + 1
+    } else if (lastDate === twoDaysAgo && freezesAvailable > 0) {
+      // missed exactly one day, but a freeze covers it
+      next = streak + 1
+      usedFreeze = true
+      freezeData.used += 1
+      ls.set('pom_streak_freezes', freezeData)
+    } else if (lastDate === '') {
+      // first ever session
+      next = 1
+    } else {
+      // missed too many days or no freezes left, reset
+      next = 1
+    }
+
     setStreak(next)
     ls.set('pom_streak', next)
     ls.set('pom_lastDate', today)
-    if (next > 1) showToast(`🔥 ${next} day streak!`)
+
+    if (usedFreeze) {
+      showToast(`🧊 Streak freeze used — ${next} day streak protected!`)
+    } else if (next > 1) {
+      showToast(`🔥 ${next} day streak!`)
+    }
   }, [streak, showToast])
 
   // ─── AUDIO ───────────────────────────────────────────────────────────────────
@@ -1421,6 +1468,9 @@ export default function App() {
         const newCycles = isPomodoro ? t.cyclesDone + 1 : t.cyclesDone
         confetti()
         showToast(isPomodoro ? `🍅 ${t.name} complete! Take a break.` : `⚡ Break over - back to focus!`)
+        if (isPomodoro) {
+          setTimeout(() => setShowMoodPrompt(id), 800)
+        }
         // determine next mode
         let nextMode
         if (isPomodoro) {
@@ -1616,6 +1666,7 @@ export default function App() {
   useEffect(() => { ls.set('pom_note', note) }, [note])
   useEffect(() => { ls.set('pom_coach_chat', coachMessages2) }, [coachMessages2])
   useEffect(() => { ls.set('pom_distractions', distractions) }, [distractions])
+  useEffect(() => { ls.set('pom_session_moods', sessionMoods) }, [sessionMoods])
   useEffect(() => {
     localStorage.setItem('pom_theme_dark', JSON.stringify(isDark))
   }, [isDark])
@@ -2348,13 +2399,11 @@ export default function App() {
               </span>
             )}
             {streak > 0 && (
-              <span style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: 'rgba(255,255,255,0.75)',
-                marginLeft: 4,
-                letterSpacing: 0.3,
-              }}>🔥 {streak}</span>
+              <span
+                title={`${streakFreezesLeft} streak freeze(s) left this month`}
+                style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.75)', marginLeft: 4, letterSpacing: 0.3, cursor: 'default' }}>
+                🔥 {streak}
+              </span>
             )}
                                   </div>
         </div>
@@ -2755,6 +2804,9 @@ export default function App() {
                 {streak > 0 && (
                   <div style={{ marginTop:10, fontSize:12, color:'rgba(255,255,255,0.6)', textAlign:'center' }}>
                     🔥 <strong style={{color:'#fff'}}>{streak} day</strong> streak — keep it going!
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:3 }}>
+                      🧊 {streakFreezesLeft} freeze{streakFreezesLeft !== 1 ? 's' : ''} left this month — missing a day won't break your streak
+                    </div>
                   </div>
                 )}
               </div>
@@ -2977,6 +3029,24 @@ export default function App() {
                 </div>
               )}
 
+              {/* ── MOOD TREND ── */}
+              {sessionMoods.length > 0 && (
+                <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                  <div style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:10 }}>How Your Sessions Feel</div>
+                  <div style={{ display:'flex', gap:6 }}>
+                    {sessionMoods.slice(-20).map((m, i) => {
+                      const emojiMap = { Hard: '😫', Okay: '😐', Good: '😊', Great: '🔥' }
+                      return (
+                        <div key={i} title={m.mood} style={{ fontSize:16, opacity: 0.4 + (i/20)*0.6 }}>
+                          {emojiMap[m.mood] || '😐'}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', marginTop:8 }}>Last {Math.min(sessionMoods.length, 20)} sessions, oldest to newest</div>
+                </div>
+              )}
+
               
               {/* ── ACTION BUTTONS ── */}
               <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
@@ -3076,6 +3146,36 @@ export default function App() {
       )}
 
       
+      {/* ══ MOOD PROMPT MODAL ══════════════════════════════════════ */}
+      {showMoodPrompt && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', backdropFilter:'blur(8px)', zIndex:999, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={()=>setShowMoodPrompt(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:24, width:'90%', maxWidth:320, color:'#fff', textAlign:'center' }}>
+            <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)', marginBottom:14 }}>How did that session feel?</div>
+            <div style={{ display:'flex', justifyContent:'center', gap:10 }}>
+              {[
+                { emoji: '😫', label: 'Hard' },
+                { emoji: '😐', label: 'Okay' },
+                { emoji: '😊', label: 'Good' },
+                { emoji: '🔥', label: 'Great' },
+              ].map(m => (
+                <button key={m.label} onClick={() => logSessionMood(m.label)}
+                  style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:14, padding:'10px 14px', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:4, fontSize:11, color:'rgba(255,255,255,0.7)' }}
+                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.14)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.06)'}>
+                  <span style={{ fontSize:22 }}>{m.emoji}</span>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={()=>setShowMoodPrompt(null)}
+              style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.3)', fontSize:11, marginTop:14, cursor:'pointer' }}>
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ══ DISTRACTION LOG MODAL ══════════════════════════════════ */}
       {showDistractionLog && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
