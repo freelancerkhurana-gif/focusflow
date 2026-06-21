@@ -3627,8 +3627,8 @@ export default function App() {
       {/* Footer */}
       {tab !== 'timer' && (
         <div style={{ position:'fixed', bottom:6, left:'50%', transform:'translateX(-50%)', display:'flex', gap:16, fontSize:10, color:'rgba(255,255,255,0.2)', zIndex:1 }}>
-          {['Privacy','Terms','Contact'].map(l=>(
-            <span key={l} style={{ cursor:'pointer' }} onClick={()=>window.open(`https://www.pomodoros.io/${l.toLowerCase()}`,'_blank')}>{l}</span>
+          {['Blog','Privacy','Terms','Contact'].map(l=>(
+            <span key={l} style={{ cursor:'pointer' }} onClick={()=>window.open(l==='Blog' ? '/blog' : `https://www.pomodoros.io/${l.toLowerCase()}`, l==='Blog' ? '_self' : '_blank')}>{l}</span>
           ))}
         </div>
       )}
