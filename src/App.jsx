@@ -1119,6 +1119,7 @@ export default function App() {
   // ── MOOD TRACKING ──
   const [sessionMoods, setSessionMoods] = useState(() => ls.get('pom_session_moods', []))
   const [showMoodPrompt, setShowMoodPrompt] = useState(null) // holds timer id or null
+  const [dailyInsightText, setDailyInsightText] = useState('')
 
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
@@ -1713,7 +1714,70 @@ export default function App() {
     }
   }, [hourlyFocusData])
 
+  useEffect(() => {
+    setDailyInsightText(generateDailyInsight())
+  }, [])
+
   // ─── AI COACH CHAT FUNCTIONS ─────────────────────────────────────────────────────
+  const generateDailyInsight = () => {
+    const today = new Date().toDateString()
+    const cached = ls.get('pom_daily_insight', null)
+    if (cached && cached.date === today) return cached.text
+
+    const insights = []
+
+    // Best hour from existing weeklyInsights
+    if (weeklyInsights.bestHour) {
+      insights.push(`Your best focus hour is around ${weeklyInsights.bestHour}:00 — try scheduling your hardest task then.`)
+    }
+
+    // Mood trend
+    if (sessionMoods.length >= 3) {
+      const recent = sessionMoods.slice(-5)
+      const goodCount = recent.filter(m => m.mood === 'Good' || m.mood === 'Great').length
+      if (goodCount >= 4) {
+        insights.push(`Your last few sessions felt great — whatever you're doing right now is working.`)
+      } else if (goodCount <= 1) {
+        insights.push(`Your recent sessions have felt tough. Try a shorter 2-minute session to rebuild momentum.`)
+      }
+    }
+
+    // Distraction pattern
+    if (distractions.length >= 3) {
+      const counts = {}
+      distractions.forEach(d => { counts[d.reason] = (counts[d.reason] || 0) + 1 })
+      const top = Object.entries(counts).sort((a,b) => b[1]-a[1])[0]
+      if (top) {
+        insights.push(`"${top[0]}" has pulled you away ${top[1]} times recently — worth putting it out of reach before your next session?`)
+      }
+    }
+
+    // Streak status
+    if (streak >= 3) {
+      insights.push(`You're on a ${streak}-day streak. One more session today keeps it alive.`)
+    } else if (streak === 0 && totalFocusSecs === 0) {
+      insights.push(`A fresh day. Even a single 2-minute session counts as a win — want to start one now?`)
+    }
+
+    // Heatmap-based day-of-week pattern
+    const dayOfWeek = new Date().getDay()
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    const sameDayEntries = Object.entries(heatmapData).filter(([date]) => new Date(date).getDay() === dayOfWeek)
+    if (sameDayEntries.length >= 3) {
+      const avgSecs = sameDayEntries.reduce((s,[,v]) => s+v, 0) / sameDayEntries.length
+      if (avgSecs > 1800) {
+        insights.push(`${dayNames[dayOfWeek]}s tend to be one of your stronger focus days. Make the most of it.`)
+      }
+    }
+
+    const text = insights.length > 0
+      ? insights[Math.floor(Math.random() * insights.length)]
+      : `Ready when you are. Pick a task and start your first session of the day.` 
+
+    ls.set('pom_daily_insight', { date: today, text })
+    return text
+  }
+
   const generateCoachReply = (userMsg) => {
     const msg = userMsg.toLowerCase()
     const remaining = pendingTasks
@@ -2487,6 +2551,27 @@ export default function App() {
             boxSizing: 'border-box',
             alignItems: 'center',
           }}>
+            {/* Daily Insight Banner */}
+            {dailyInsightText && (
+              <div style={{
+                width: '100%',
+                maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 680 : 860,
+                margin: '0 auto 12px',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 14,
+                padding: '10px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                flexShrink: 0,
+              }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>💡</span>
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
+                  {dailyInsightText}
+                </span>
+              </div>
+            )}
             {/* Timer grid */}
             <div className="timer-grid" style={{
               display: 'grid',
