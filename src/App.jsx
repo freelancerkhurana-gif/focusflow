@@ -1176,11 +1176,6 @@ export default function App() {
     const saved = localStorage.getItem('pom_theme_dark')
     return saved !== null ? JSON.parse(saved) : false
   })
-  const [loadedBgImages, setLoadedBgImages] = useState(() => new Set([currentBgImage]))
-
-  useEffect(() => {
-    setLoadedBgImages(prev => new Set([...prev, currentBgImage]))
-  }, [currentBgImage])
   const bgColor = isDark ? '#0a0a0a' : 'transparent'
   const accentColor = isDark ? '#1a1a1a' : bgColor
   const currentBgImage = isDark
@@ -1190,6 +1185,11 @@ export default function App() {
     : (timerMode === 'shortBreak' || timerMode === 'longBreak'
         ? BG_LIGHT_BREAK
         : BG_LIGHT_WORK)
+  const [loadedBgImages, setLoadedBgImages] = useState(() => new Set([currentBgImage]))
+
+  useEffect(() => {
+    setLoadedBgImages(prev => new Set([...prev, currentBgImage]))
+  }, [currentBgImage])
   const meshOpacity = isDark ? 0 : 1
   const textMain = '#fff'
   const textDim = isDark ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.7)'
