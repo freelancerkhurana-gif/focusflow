@@ -1779,10 +1779,6 @@ export default function App() {
     }
   }, [hourlyFocusData])
 
-  useEffect(() => {
-    setDailyInsightText(generateDailyInsight())
-  }, [])
-
   // ─── AI COACH CHAT FUNCTIONS ─────────────────────────────────────────────────────
   const generateDailyInsight = () => {
     const today = new Date().toDateString()
@@ -1842,6 +1838,10 @@ export default function App() {
     ls.set('pom_daily_insight', { date: today, text })
     return text
   }
+
+  useEffect(() => {
+    setDailyInsightText(generateDailyInsight())
+  }, [])
 
   const generateCoachReply = (userMsg) => {
     const msg = userMsg.toLowerCase()
