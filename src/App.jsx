@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabase'
+import { toPng } from 'html-to-image'
 
 // ─── SVG RING COMPONENT ───────────────────────────────────────────────────────────
 const CIRC = 2 * Math.PI * 90
@@ -1015,6 +1016,22 @@ export default function App() {
     return Math.max(0, 2 - freezeData.used)
   })()
 
+  const weeklyStats = (() => {
+    const days = []
+    let weekTotal = 0
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(d.getDate() - i)
+      const key = d.toISOString().split('T')[0]
+      const secs = heatmapData[key] || 0
+      weekTotal += secs
+      days.push({ date: d, secs })
+    }
+    const bestDay = days.reduce((a, b) => b.secs > a.secs ? b : a, days[0])
+    const activeDays = days.filter(d => d.secs > 0).length
+    return { days, weekTotal, bestDay, activeDays }
+  })()
+
   // ── SUPABASE AUTH ──
   const [user, setUser] = useState(null)
   const [showLeaderboard, setShowLeaderboard] = useState(false)
@@ -1151,6 +1168,8 @@ export default function App() {
   const [showMoodPrompt, setShowMoodPrompt] = useState(null) // holds timer id or null
   const [dailyInsightText, setDailyInsightText] = useState('')
   const [inviteCopied, setInviteCopied] = useState(false)
+  const [showReportCard, setShowReportCard] = useState(false)
+  const reportCardRef = useRef(null)
 
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
@@ -2067,6 +2086,30 @@ export default function App() {
       `Just crushed my focus goals on pomodoros.io! 🍅\n⏱️ Focus: ${fmtTime(totalFocusSecs)}\n✅ Cycles: ${totalCycles}\nhttps://www.pomodoros.io`
     ), '_blank'
   )
+
+  const downloadReportCard = async () => {
+    if (!reportCardRef.current) return
+    try {
+      const dataUrl = await toPng(reportCardRef.current, { pixelRatio: 2 })
+      const link = document.createElement('a')
+      link.download = `pomodoros-weekly-report-${new Date().toISOString().split('T')[0]}.png` 
+      link.href = dataUrl
+      link.click()
+      showToast('Report card downloaded 📸')
+    } catch (err) {
+      console.error('Failed to generate report card:', err)
+      showToast('Could not generate image. Try again.')
+    }
+  }
+
+  const shareReportCardX = () => {
+    const hours = (weeklyStats.weekTotal / 3600).toFixed(1)
+    window.open(
+      'https://x.com/intent/tweet?text=' + encodeURIComponent(
+        `My focus this week on pomodoros.io 🍅\n⏱️ ${hours}h focused\n📅 ${weeklyStats.activeDays}/7 active days\n${streak > 0 ? `🔥 ${streak} day streak\n` : ''}https://www.pomodoros.io` 
+      ), '_blank'
+    )
+  }
 
   // ─── WASH MODE ───────────────────────────────────────────────────────────────
   const openWashMode = () => {
@@ -3195,6 +3238,28 @@ export default function App() {
                 </button>
               </div>
 
+              {/* ── WEEKLY REPORT CARD ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px', textAlign:'center' }}>
+                <div style={{ fontSize:24, marginBottom:8 }}>📸</div>
+                <div style={{ fontSize:14, fontWeight:700, color:'#fff', marginBottom:4 }}>Your Week, Visualized</div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:14 }}>
+                  Generate a shareable card of your weekly focus stats
+                </div>
+                <button onClick={() => setShowReportCard(true)}
+                  style={{
+                    background: 'rgba(255,255,255,0.15)',
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    color: '#fff',
+                    padding: '10px 24px',
+                    borderRadius: 100,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}>
+                  View My Report Card
+                </button>
+              </div>
+
               
               {/* ── ACTION BUTTONS ── */}
               <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
@@ -3288,6 +3353,101 @@ export default function App() {
             <button onClick={saveSettings}
               style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:14, borderRadius:10, fontSize:15, fontWeight:800, letterSpacing:.5 }}>
               OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══ WEEKLY REPORT CARD MODAL ══════════════════════════════ */}
+      {showReportCard && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', backdropFilter:'blur(12px)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
+          onClick={()=>setShowReportCard(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:16, maxWidth:400, width:'100%' }}>
+
+            {/* The actual card to be captured as an image */}
+            <div ref={reportCardRef} style={{
+              width: '100%',
+              aspectRatio: '1 / 1.2',
+              background: 'linear-gradient(135deg, #1a0a20 0%, #2d1230 50%, #1a1a3e 100%)',
+              borderRadius: 24,
+              padding: 32,
+              display: 'flex',
+              flexDirection: 'column',
+              color: '#fff',
+              position: 'relative',
+              overflow: 'hidden',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            }}>
+              <div style={{ position:'absolute', top:-60, right:-60, width:200, height:200, borderRadius:'50%', background:'rgba(255,255,255,0.05)' }}/>
+              <div style={{ position:'absolute', bottom:-80, left:-80, width:240, height:240, borderRadius:'50%', background:'rgba(255,255,255,0.04)' }}/>
+
+              <div style={{ fontFamily:"'Caveat', cursive", fontSize:28, fontWeight:700, marginBottom:4, position:'relative', zIndex:1 }}>
+                pomodoros<span style={{ color:'rgba(255,255,255,0.6)', fontWeight:500 }}>.io</span>
+              </div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', letterSpacing:2, textTransform:'uppercase', marginBottom:24, position:'relative', zIndex:1 }}>
+                Weekly Focus Report
+              </div>
+
+              <div style={{ fontSize:48, fontWeight:800, fontFamily:"'Outfit', sans-serif", lineHeight:1, marginBottom:4, position:'relative', zIndex:1 }}>
+                {(weeklyStats.weekTotal / 3600).toFixed(1)}h
+              </div>
+              <div style={{ fontSize:13, color:'rgba(255,255,255,0.6)', marginBottom:24, position:'relative', zIndex:1 }}>
+                focused this week
+              </div>
+
+              <div style={{ display:'flex', gap:8, marginBottom:24, position:'relative', zIndex:1 }}>
+                {weeklyStats.days.map((d, i) => {
+                  const dayLetter = ['S','M','T','W','T','F','S'][d.date.getDay()]
+                  const intensity = d.secs > 0 ? Math.min(1, d.secs / 7200) : 0
+                  return (
+                    <div key={i} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:6 }}>
+                      <div style={{
+                        width: '100%',
+                        height: 50,
+                        borderRadius: 8,
+                        background: intensity > 0 ? `rgba(255,255,255,${0.15 + intensity * 0.55})` : 'rgba(255,255,255,0.06)',
+                        display: 'flex',
+                        alignItems: 'flex-end',
+                        justifyContent: 'center',
+                      }}/>
+                      <span style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>{dayLetter}</span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div style={{ display:'flex', gap:16, marginTop:'auto', position:'relative', zIndex:1 }}>
+                <div>
+                  <div style={{ fontSize:20, fontWeight:700 }}>{weeklyStats.activeDays}/7</div>
+                  <div style={{ fontSize:10, color:'rgba(255,255,255,0.45)' }}>active days</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:20, fontWeight:700 }}>{totalCycles}</div>
+                  <div style={{ fontSize:10, color:'rgba(255,255,255,0.45)' }}>cycles today</div>
+                </div>
+                {streak > 0 && (
+                  <div>
+                    <div style={{ fontSize:20, fontWeight:700 }}>🔥 {streak}</div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.45)' }}>day streak</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Action buttons - outside the captured card */}
+            <div style={{ display:'flex', gap:10, width:'100%' }}>
+              <button onClick={downloadReportCard}
+                style={{ flex:1, background:'rgba(255,255,255,0.15)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'12px 0', borderRadius:100, fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                ⬇️ Download
+              </button>
+              <button onClick={shareReportCardX}
+                style={{ flex:1, background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', padding:'12px 0', borderRadius:100, fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                🐦 Share on X
+              </button>
+            </div>
+            <button onClick={()=>setShowReportCard(false)}
+              style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:12, cursor:'pointer' }}>
+              Close
             </button>
           </div>
         </div>
