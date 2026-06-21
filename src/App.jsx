@@ -2417,6 +2417,27 @@ export default function App() {
 
           {/* Right buttons */}
           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap: 'wrap' }}>
+            <Link
+              to="/blog"
+              style={{
+                background: 'rgba(255,255,255,0.1)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                color: 'rgba(255,255,255,0.85)',
+                padding: '8px 14px',
+                borderRadius: 100,
+                fontSize: 12,
+                fontWeight: 600,
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)' }}
+            >
+              Guides
+            </Link>
             <button
               onClick={() => setIsDark(d => !d)}
               title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
