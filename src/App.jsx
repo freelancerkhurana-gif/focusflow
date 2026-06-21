@@ -1041,11 +1041,15 @@ export default function App() {
     }
     supabase
       .from('subscriptions')
-      .select('status')
+      .select('status, pro_until, source')
       .eq('user_id', user.id)
       .single()
       .then(({ data }) => {
-        const active = data?.status === 'active'
+        if (!data) { setIsPro(false); ls.set('pom_pro', false); return }
+        let active = data.status === 'active'
+        if (active && data.source === 'referral' && data.pro_until) {
+          active = new Date(data.pro_until) > new Date()
+        }
         setIsPro(active)
         ls.set('pom_pro', active)
       })
@@ -1053,6 +1057,32 @@ export default function App() {
         setIsPro(false)
         ls.set('pom_pro', false)
       })
+  }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    const params = new URLSearchParams(window.location.search)
+    const refId = params.get('ref')
+    if (!refId || refId === user.id) return
+
+    const alreadyProcessed = ls.get('pom_referral_processed', false)
+    if (alreadyProcessed) return
+
+    fetch('/api/process-referral', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ referrerId: refId, referredId: user.id }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          ls.set('pom_referral_processed', true)
+          showToast('🎉 You and your friend both got 1 month of Pro free!')
+          setIsPro(true)
+          ls.set('pom_pro', true)
+        }
+      })
+      .catch(() => {})
   }, [user])
 
   useEffect(() => {
@@ -1120,6 +1150,7 @@ export default function App() {
   const [sessionMoods, setSessionMoods] = useState(() => ls.get('pom_session_moods', []))
   const [showMoodPrompt, setShowMoodPrompt] = useState(null) // holds timer id or null
   const [dailyInsightText, setDailyInsightText] = useState('')
+  const [inviteCopied, setInviteCopied] = useState(false)
 
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
@@ -1220,6 +1251,16 @@ export default function App() {
   const logSessionMood = (mood) => {
     setSessionMoods(prev => [...prev, { mood, ts: Date.now() }])
     setShowMoodPrompt(null)
+  }
+
+  const copyInviteLink = () => {
+    if (!user) { showToast('Sign in to get your invite link'); signIn(); return }
+    const link = `https://www.pomodoros.io/?ref=${user.id}` 
+    navigator.clipboard.writeText(link).then(() => {
+      setInviteCopied(true)
+      showToast('Invite link copied!')
+      setTimeout(() => setInviteCopied(false), 2000)
+    })
   }
 
   const upsertProfile = async (u) => {
@@ -3131,6 +3172,28 @@ export default function App() {
                   <div style={{ fontSize:10, color:'rgba(255,255,255,0.3)', marginTop:8 }}>Last {Math.min(sessionMoods.length, 20)} sessions, oldest to newest</div>
                 </div>
               )}
+
+              {/* ── INVITE FRIENDS ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px', textAlign:'center' }}>
+                <div style={{ fontSize:24, marginBottom:8 }}>🎁</div>
+                <div style={{ fontSize:14, fontWeight:700, color:'#fff', marginBottom:4 }}>Invite a friend, you both get Pro free</div>
+                <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:14, lineHeight:1.5 }}>
+                  When a friend signs up using your link, you each get 1 month of Pro — unlimited AI coach, all sounds, up to 4 timers, and more.
+                </div>
+                <button onClick={copyInviteLink}
+                  style={{
+                    background: inviteCopied ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.15)',
+                    border: `1px solid ${inviteCopied ? 'rgba(74,222,128,0.4)' : 'rgba(255,255,255,0.25)'}`,
+                    color: '#fff',
+                    padding: '10px 24px',
+                    borderRadius: 100,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}>
+                  {inviteCopied ? '✓ Copied!' : '🔗 Copy My Invite Link'}
+                </button>
+              </div>
 
               
               {/* ── ACTION BUTTONS ── */}
