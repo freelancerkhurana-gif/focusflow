@@ -680,7 +680,7 @@ function TimerCard({
           }}>
           Break
         </button>
-      </div>
+              </div>
       </div>
 
       
@@ -721,10 +721,10 @@ function TimerCard({
         <div style={{ textAlign:'center' }}>
           <div style={{
   fontSize: isLarge
-    ? 'clamp(48px, 8vw, 110px)'
+    ? 'clamp(43px, 7.2vw, 99px)'
     : isMed
-      ? 'clamp(40px, 6vw, 88px)'
-      : 'clamp(36px, 5vw, 72px)',
+      ? 'clamp(36px, 5.4vw, 79px)'
+      : 'clamp(32px, 4.5vw, 65px)',
   fontWeight: 300,
   color: '#fff',
   letterSpacing: -2,
@@ -736,7 +736,7 @@ function TimerCard({
   flexShrink: 1,
   minWidth: 0,
 }}>
-            {fmtTime(timer.secsLeft)}
+            {timer.countUp ? fmtHMS(timer.elapsed || 0) : fmtTime(timer.secsLeft)}
           </div>
         </div>
 
@@ -883,12 +883,13 @@ function TimerCard({
           style={{
             background: 'transparent',
             border: 'none',
-            color: 'rgba(255,255,255,0.35)',
-            fontSize: 10,
-            marginTop: 4,
+            color: 'rgba(255,255,255,0.6)',
+            fontSize: 13,
+            marginTop: 8,
             cursor: 'pointer',
             padding: 0,
             textDecoration: 'underline',
+            letterSpacing: 0.2,
           }}>
           Got distracted?
         </button>
@@ -982,6 +983,8 @@ export default function App() {
     cyclesDone: 0,
     totalFocusSecs: 0,
     totalBreakSecs: 0,
+    countUp: false,
+    elapsed: 0,
   })
   const [timers, setTimers] = useState(() => [makeTimer(1, 1)])
   const [editingId, setEditingId] = useState(null)
@@ -1172,6 +1175,7 @@ export default function App() {
 
   // ── AI COACH CHAT ──
   const [coachChatOpen, setCoachChatOpen] = useState(false)
+  const [timerTabCoachOpen, setTimerTabCoachOpen] = useState(false)
   const [coachMessages2, setCoachMessages2] = useState(() => ls.get('pom_coach_chat', []))
   const [coachInput, setCoachInput] = useState('')
   const [coachTyping, setCoachTyping] = useState(false)
@@ -1606,54 +1610,77 @@ export default function App() {
   const startTimer = useCallback((id) => {
     if (timerRefs.current[id]) return
     bumpStreak()
-    timerRefs.current[id] = setInterval(() => {
-      setTimers(prev => (prev || []).map(t => {
-        if (t.id !== id) return t
-        // tick
-        if (t.secsLeft > 1) {
-          const upd = { ...t, secsLeft: t.secsLeft - 1 }
+    
+    // Get current timer to check if it's count-up mode
+    const currentTimer = timers.find(t => t.id === id)
+    if (!currentTimer) return
+    
+    if (currentTimer.countUp) {
+      // COUNT-UP MODE - similar to stopwatch logic
+      const elapsed = currentTimer.elapsed
+      const startedAt = Date.now() - elapsed * 1000
+      
+      timerRefs.current[id] = setInterval(() => {
+        const newElapsed = Math.floor((Date.now() - startedAt) / 1000)
+        setTimers(prev => prev.map(t => {
+          if (t.id !== id) return t
+          const upd = { ...t, elapsed: newElapsed }
           if (t.mode === 'pomodoro') upd.totalFocusSecs = t.totalFocusSecs + 1
           else upd.totalBreakSecs = t.totalBreakSecs + 1
           return upd
-        }
-        // session complete
-        clearInterval(timerRefs.current[id])
-        delete timerRefs.current[id]
-        beep()
-        const isPomodoro = t.mode === 'pomodoro'
-        const newCycles = isPomodoro ? t.cyclesDone + 1 : t.cyclesDone
-        confetti()
-        showToast(isPomodoro ? `🍅 ${t.name} complete! Take a break.` : `⚡ Break over - back to focus!`)
-        if (isPomodoro) {
-          setTimeout(() => setShowMoodPrompt(id), 800)
-        }
-        // determine next mode
-        let nextMode
-        if (isPomodoro) {
-          nextMode = newCycles % settings.longBreakEvery === 0 ? 'longBreak' : 'shortBreak'
-        } else {
-          nextMode = 'pomodoro'
-        }
-        setTimerMode(nextMode === 'pomodoro' ? 'pomodoro' : 'shortBreak')
-        const timerWorkMin = t.workMin || settings.pomodoroMin
-        const timerBreakMin = t.breakMin || settings.shortBreakMin
-        const nextSecs = nextMode === 'pomodoro'
-          ? timerWorkMin * 60
-          : timerBreakMin * 60
-        const upd = {
-          ...t,
-          running: false,
-          mode: nextMode,
-          secsLeft: nextSecs,
-          cyclesDone: newCycles,
-          totalSecs: nextSecs,
-          totalFocusSecs: isPomodoro ? t.totalFocusSecs + 1 : t.totalFocusSecs,
-          totalBreakSecs: !isPomodoro ? t.totalBreakSecs + 1 : t.totalBreakSecs,
-        }
-        return upd
-      }))
-    }, 1000)
-  }, [bumpStreak, showToast, settings])
+        }))
+      }, 100)
+    } else {
+      // NORMAL COUNTDOWN MODE
+      timerRefs.current[id] = setInterval(() => {
+        setTimers(prev => (prev || []).map(t => {
+          if (t.id !== id) return t
+          // tick
+          if (t.secsLeft > 1) {
+            const upd = { ...t, secsLeft: t.secsLeft - 1 }
+            if (t.mode === 'pomodoro') upd.totalFocusSecs = t.totalFocusSecs + 1
+            else upd.totalBreakSecs = t.totalBreakSecs + 1
+            return upd
+          }
+          // session complete
+          clearInterval(timerRefs.current[id])
+          delete timerRefs.current[id]
+          beep()
+          const isPomodoro = t.mode === 'pomodoro'
+          const newCycles = isPomodoro ? t.cyclesDone + 1 : t.cyclesDone
+          confetti()
+          showToast(isPomodoro ? `🍅 ${t.name} complete! Take a break.` : `⚡ Break over - back to focus!`)
+          if (isPomodoro) {
+            setTimeout(() => setShowMoodPrompt(id), 800)
+          }
+          // determine next mode
+          let nextMode
+          if (isPomodoro) {
+            nextMode = newCycles % settings.longBreakEvery === 0 ? 'longBreak' : 'shortBreak'
+          } else {
+            nextMode = 'pomodoro'
+          }
+          setTimerMode(nextMode === 'pomodoro' ? 'pomodoro' : 'shortBreak')
+          const timerWorkMin = t.workMin || settings.pomodoroMin
+          const timerBreakMin = t.breakMin || settings.shortBreakMin
+          const nextSecs = nextMode === 'pomodoro'
+            ? timerWorkMin * 60
+            : timerBreakMin * 60
+          const upd = {
+            ...t,
+            running: false,
+            mode: nextMode,
+            secsLeft: nextSecs,
+            cyclesDone: newCycles,
+            totalSecs: nextSecs,
+            totalFocusSecs: isPomodoro ? t.totalFocusSecs + 1 : t.totalFocusSecs,
+            totalBreakSecs: !isPomodoro ? t.totalBreakSecs + 1 : t.totalBreakSecs,
+          }
+          return upd
+        }))
+      }, 1000)
+    }
+  }, [bumpStreak, showToast, settings, timers])
 
   const pauseTimer = useCallback((id) => {
     clearTimerInterval(id)
@@ -2528,6 +2555,51 @@ export default function App() {
             >
               Guides
             </Link>
+            
+            {/* This control acts on timers[0] only. If multiple timers are visible (Pro users with 2+ timers),
+               this header toggle will only affect the first one — per-timer toggles would
+               need to move back to each TimerCard if that becomes confusing in practice. */}
+            <button
+              onClick={() => {
+                if (timers[0]?.running) return
+                setTimers(prev => prev.map((t, i) => 
+                  i === 0 
+                    ? { 
+                        ...t, 
+                        countUp: !t.countUp, 
+                        elapsed: !t.countUp ? 0 : t.elapsed,
+                        secsLeft: !t.countUp 
+                          ? t.secsLeft 
+                          : (t.mode === 'pomodoro' ? t.workMin : t.breakMin) * 60
+                      }
+                    : t
+                ))
+              }}
+              disabled={timers[0]?.running}
+              style={{
+                background: timers[0]?.countUp ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                color: timers[0]?.running ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.85)',
+                padding: '8px 14px',
+                borderRadius: 100,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: timers[0]?.running ? 'not-allowed' : 'pointer',
+                opacity: timers[0]?.running ? 0.5 : 1,
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={e => {
+                if (!timers[0]?.running) {
+                  e.currentTarget.style.background = timers[0]?.countUp ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.2)'
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = timers[0]?.countUp ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)'
+              }}
+            >
+              {timers[0]?.countUp ? 'Counting Up' : 'Count Up'}
+            </button>
+            
             {!authLoading && !user && (
               <button onClick={signIn}
                 style={{
@@ -2722,22 +2794,10 @@ export default function App() {
         </div>
 
       {/* Tagline - visible only on timer tab */}
-      {tab === 'timer' && (
-        <div style={{
-          fontSize: 'clamp(11px, 2vw, 13px)',
-          color: 'rgba(255,255,255,0.55)',
-          letterSpacing: 0.5,
-          textAlign: 'center',
-          padding: '4px 0 8px',
-        }}>
-          Switch tasks without losing your place — each timer remembers exactly where it left off.
-        </div>
-      )}
-
       {/* ══ NAV TABS ════════════════════════════════════════════════════════════ */}
       <div className="nav-scroll" style={{ flexShrink: 0, padding: '6px 8px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
         <div style={{ display:'flex', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius:100, padding:5, gap:2, backdropFilter: 'blur(12px)' }}>
-          {[{k:'timer',l:'Pomodoro'},{k:'sounds',l:'Sounds'},{k:'notes',l:'Notes'},{k:'stopwatch',l:'Stopwatch'},{k:'stats',l:'Report'}].map(t => (
+          {[{k:'timer',l:'Pomodoro'},{k:'sounds',l:'Sounds'},{k:'notes',l:'Notes'},{k:'stats',l:'Report'}].map(t => (
             <button key={t.k} className="tab-btn nav-tab-label" onClick={()=>setTab(t.k)}
               style={{
                 background: tab===t.k
@@ -2763,18 +2823,16 @@ export default function App() {
           ))}
         </div>
 
-        {/* Add timer / stopwatch */}
-        {(tab==='timer'||tab==='stopwatch') && (
+        {/* Add timer */}
+        {tab==='timer' && (
           <button
             onClick={() => {
-              const list = tab === 'timer' ? timers : stopwatches
               const limit = isPro ? 4 : 1
-              if (list.length >= limit) {
+              if (timers.length >= limit) {
                 setShowUpgrade(true)
                 return
               }
-              if (tab === 'timer') addTimer()
-              else addStopwatch()
+              addTimer()
             }}
             style={{
               background: 'rgba(255,255,255,0.08)',
@@ -2787,7 +2845,7 @@ export default function App() {
               backdropFilter: 'blur(8px)',
               cursor: 'pointer',
             }}>
-            + Add {tab==='timer'?'Timer':'Stopwatch'}{!isPro ? ' (Pro: up to 4) 🔒' : ''}
+            + Add Timer{!isPro ? ' (Pro: up to 4) 🔒' : ''}
           </button>
         )}
 
@@ -2815,60 +2873,6 @@ export default function App() {
             boxSizing: 'border-box',
             alignItems: 'center',
           }}>
-            {/* Daily Insight Banner */}
-            {dailyInsightText && (
-              <div style={{
-                width: '100%',
-                maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 680 : 860,
-                margin: '0 auto 12px',
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 14,
-                padding: '10px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                flexShrink: 0,
-              }}>
-                <span style={{ fontSize: 16, flexShrink: 0 }}>💡</span>
-                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
-                  {dailyInsightText}
-                </span>
-              </div>
-            )}
-            
-            {/* Coach Chat Shortcut */}
-            <div style={{ textAlign: 'center', marginBottom: '12px' }}>
-              <button
-                onClick={() => { setTab('stats'); setCoachChatOpen(true); }}
-                style={{
-                  background: 'rgba(255,255,255,0.08)',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: 100,
-                  padding: '8px 18px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'rgba(255,255,255,0.75)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  margin: '0 auto',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.12)';
-                  e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                  e.currentTarget.style.color = 'rgba(255,255,255,0.75)';
-                }}
-              >
-                💬 Ask your coach
-              </button>
-            </div>
-            
             {/* Timer grid */}
             <div className="timer-grid" style={{
               display: 'grid',
@@ -2944,8 +2948,103 @@ export default function App() {
               ))}
             </div>
 
-            
-            
+            {/* Daily Insight Banner */}
+            {dailyInsightText && (
+              <div style={{
+                fontSize: 12,
+                color: 'rgba(255,255,255,0.45)',
+                textAlign: 'center',
+                padding: '8px 0',
+                maxWidth: 380,
+                margin: '8px auto 0',
+                lineHeight: 1.4,
+              }}>
+                <span style={{ fontSize: 12, marginRight: 6 }}>💡</span>
+                {dailyInsightText}
+              </div>
+            )}
+
+            {/* Coach Chat - collapsible on timer tab */}
+            <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px', margin:'16px auto 0', maxWidth:420 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: timerTabCoachOpen ? 12 : 0 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <div style={{ fontSize:'clamp(14px, 2.5vw, 18px)' }}>💬</div>
+                  <div>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <div style={{ fontSize:'clamp(11px, 2vw, 13px)', fontWeight:700, color:'#fff' }}>Ask Your Coach</div>
+                      <span style={{ fontSize:9, background:'rgba(16,185,129,0.2)', border:'1px solid rgba(16,185,129,0.4)', color:'#6ee7b7', padding:'2px 8px', borderRadius:100, fontWeight:700, letterSpacing:0.5, marginLeft:8 }}>AI POWERED</span>
+                      {!isPro && (() => {
+                        const today = new Date().toDateString()
+                        const usage = ls.get('pom_coach_usage', { date: today, count: 0 })
+                        const remaining = usage.date === today ? Math.max(0, 5 - usage.count) : 5
+                        return (
+                          <span style={{ fontSize:9, color:'rgba(255,255,255,0.4)', marginLeft:8 }}>
+                            {remaining}/5 free today
+                          </span>
+                        )
+                      })()}
+                    </div>
+                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:1 }}>Plan tasks, get motivated, beat procrastination</div>
+                  </div>
+                </div>
+                <button onClick={()=>setTimerTabCoachOpen(o=>!o)}
+                  style={{ background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.18)', color:'#fff', borderRadius:100, padding:'6px 14px', fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                  {timerTabCoachOpen ? 'Close' : 'Open Chat'}
+                </button>
+              </div>
+
+              {timerTabCoachOpen && (
+                <>
+                  <div style={{ maxHeight:280, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:12, paddingRight:4 }}>
+                    {coachMessages2.length === 0 && (
+                      <div style={{ textAlign:'center', padding:'20px 10px', fontSize:12, color:'rgba(255,255,255,0.35)', lineHeight:1.6 }}>
+                        👋 Hi! Tell me what you're working on, your deadline, or how you're feeling — I'll help you plan and stay motivated.
+                      </div>
+                    )}
+                    {coachMessages2.map((m,i) => (
+                      <div key={i} style={{
+                        alignSelf: m.role==='user' ? 'flex-end' : 'flex-start',
+                        maxWidth: '85%',
+                        background: m.role==='user' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)',
+                        border: m.role==='user' ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 14,
+                        padding: '8px 12px',
+                        fontSize: 12,
+                        color: '#fff',
+                        lineHeight: 1.5,
+                      }}>
+                        {m.text}
+                      </div>
+                    ))}
+                    {coachTyping && (
+                      <div style={{ alignSelf:'flex-start', fontSize:11, color:'rgba(255,255,255,0.4)', padding:'4px 12px' }}>
+                        Thinking...
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <input
+                      value={coachInput}
+                      onChange={e=>setCoachInput(e.target.value)}
+                      onKeyDown={e=>{ if(e.key==='Enter') sendCoachMessage() }}
+                      placeholder="e.g. I have an exam tomorrow, help me plan"
+                      style={{ flex:1, background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:100, color:'#fff', fontSize:12, padding:'9px 16px', caretColor:'#fff' }}
+                    />
+                    <button onClick={sendCoachMessage}
+                      style={{ background:'rgba(255,255,255,0.2)', border:'1px solid rgba(255,255,255,0.3)', color:'#fff', borderRadius:100, padding:'9px 18px', fontSize:12, fontWeight:700, cursor:'pointer', flexShrink:0 }}>
+                      Send
+                    </button>
+                  </div>
+                  {coachMessages2.length > 0 && (
+                    <button onClick={()=>{ setCoachMessages2([]); ls.set('pom_coach_chat',[]) }}
+                      style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.3)', fontSize:10, marginTop:8, cursor:'pointer', padding:0 }}>
+                      Clear conversation
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+
               
                         </div>
         )}
@@ -4031,8 +4130,8 @@ export default function App() {
             <h2 style={{ margin:'0 0 8px', fontSize:24, fontWeight:800 }}>Upgrade to Pro</h2>
             <p style={{ color:'rgba(255,255,255,0.6)', marginBottom:24, fontSize:14, lineHeight:1.65 }}>Unlock cloud sync and unlimited history</p>
             {[
-                '⏱️ Up to 4 timers & stopwatches',
-                '🧠 Unlimited AI Coach messages',
+                '⏱️ Up to 4 independent timers (each with countdown or count-up mode)',
+                '🧠 Unlimited AI Coach — planning, motivation, and progress chat',
                 '🎵 All ambient sounds (rain, café, forest)',
                 '☁️ Cloud sync across all devices',
                 '📊 CSV export of your stats',

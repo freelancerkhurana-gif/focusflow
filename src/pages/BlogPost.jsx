@@ -89,33 +89,6 @@ export default function BlogPost() {
           })}
         </div>
 
-        <div style={{
-          marginTop: 48,
-          background: 'rgba(255,255,255,0.06)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 16,
-          padding: '24px 28px',
-          textAlign: 'center',
-        }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Ready to put this into practice?</div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginBottom: 16 }}>
-            Start a free focus session with Pomodoros.io — no signup required.
-          </div>
-          <Link to="/" style={{
-            display: 'inline-block',
-            background: 'rgba(255,255,255,0.18)',
-            border: '1px solid rgba(255,255,255,0.3)',
-            color: '#fff',
-            padding: '10px 28px',
-            borderRadius: 100,
-            fontSize: 13,
-            fontWeight: 700,
-            textDecoration: 'none',
-          }}>
-            Start Focusing →
-          </Link>
-        </div>
-
         <Link to="/blog" style={{
           display: 'inline-block',
           marginTop: 32,
