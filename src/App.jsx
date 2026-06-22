@@ -406,7 +406,13 @@ function SWCard({ sw, count, bgColor, removeSW, toggleSW, lapSW, resetSW,
 
       {/* Time display */}
       <div style={{
-        fontSize: digitPx,
+        fontSize: isMobile
+    ? (window.innerWidth < 360 ? 'clamp(36px, 8vw, 54px)' : 'clamp(40px, 9vw, 61px)')
+    : isLarge
+      ? 'clamp(60px, 7vw, 86px)'
+      : isMed
+        ? 'clamp(50px, 6vw, 74px)'
+        : 'clamp(40px, 5vw, 61px)',
         fontWeight: 300,
         color: '#fff',
         letterSpacing: -2,
@@ -448,7 +454,7 @@ function SWCard({ sw, count, bgColor, removeSW, toggleSW, lapSW, resetSW,
               backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)',
               color: '#fff',
-              fontSize: isLarge ? 14 : isMed ? 12 : 11,
+              fontSize: isLarge ? 'clamp(12px, 1.5vw, 14px)' : isMed ? 'clamp(11px, 1.4vw, 12px)' : 'clamp(10px, 1.3vw, 11px)',
               fontWeight: 700,
               letterSpacing: 2,
               cursor: 'pointer',
@@ -469,7 +475,7 @@ function SWCard({ sw, count, bgColor, removeSW, toggleSW, lapSW, resetSW,
               border: '1px solid rgba(255,255,255,0.3)',
               background: 'rgba(255,255,255,0.12)',
               color: sw.running ? '#fff' : 'rgba(255,255,255,0.3)',
-              fontSize: isLarge ? 14 : isMed ? 12 : 11,
+              fontSize: isLarge ? 'clamp(12px, 1.5vw, 14px)' : isMed ? 'clamp(11px, 1.4vw, 12px)' : 'clamp(10px, 1.3vw, 11px)',
               fontWeight: 700,
               cursor: sw.running ? 'pointer' : 'not-allowed',
               opacity: sw.running ? 1 : 0.4,
@@ -485,7 +491,7 @@ function SWCard({ sw, count, bgColor, removeSW, toggleSW, lapSW, resetSW,
               border: '1px solid rgba(255,255,255,0.2)',
               background: 'rgba(255,255,255,0.08)',
               color: '#fff',
-              fontSize: isLarge ? 14 : isMed ? 12 : 11,
+              fontSize: isLarge ? 'clamp(12px, 1.5vw, 14px)' : isMed ? 'clamp(11px, 1.4vw, 12px)' : 'clamp(10px, 1.3vw, 11px)',
               fontWeight: 700,
               cursor: 'pointer',
               fontFamily: "\"Outfit\", sans-serif",
@@ -859,7 +865,7 @@ function TimerCard({
             color: 'rgba(255,255,255,0.6)',
             padding: '6px 21px',
             borderRadius: 100,
-            fontSize: 15,
+            fontSize: 'clamp(12px, 2vw, 15px)',
             fontWeight: 600,
             cursor: timer.running ? 'not-allowed' : 'pointer',
             opacity: timer.running ? 0.35 : 1,
@@ -1035,6 +1041,7 @@ export default function App() {
 
   // ── SUPABASE AUTH ──
   const [user, setUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [showLeaderboard, setShowLeaderboard] = useState(false)
   const [leaderboard, setLeaderboard] = useState([])
   const [lbLoading, setLbLoading] = useState(false)
@@ -1086,7 +1093,7 @@ export default function App() {
     const alreadyProcessed = ls.get('pom_referral_processed', false)
     if (alreadyProcessed) return
 
-    fetch('/api/process-referral', {
+    fetch('/api/apply-referral-discount', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ referrerId: refId, referredId: user.id }),
@@ -1095,12 +1102,16 @@ export default function App() {
       .then(data => {
         if (data.status === 'success') {
           ls.set('pom_referral_processed', true)
-          showToast('🎉 You and your friend both got 1 month of Pro free!')
-          setIsPro(true)
-          ls.set('pom_pro', true)
+          ls.set('pom_referral_discount_pending', true)
+          showToast('Referral applied! You\'ll get 50% off your first month when you upgrade to Pro.')
         }
       })
       .catch(() => {})
+    
+    // NOTE: Backend webhook dependency
+    // When the referred user successfully completes checkout, the backend webhook handler
+    // must also apply the same 50% off coupon to the referrer's next invoice.
+    // This requires a Stripe coupon with duration: 'once' to be configured in Stripe.
   }, [user])
 
   useEffect(() => {
@@ -1145,6 +1156,7 @@ export default function App() {
   const [showOnboard, setShowOnboard] = useState(false)
   const [onboardStep, setOnboardStep] = useState(1)
   const [showDistractionLog, setShowDistractionLog] = useState(false)
+  const [showProfileEditor, setShowProfileEditor] = useState(false)
   const [distractionTimerId, setDistractionTimerId] = useState(null)
   const [customDistraction, setCustomDistraction] = useState('')
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
@@ -1209,13 +1221,85 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
+      setAuthLoading(false)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
       setUser(session?.user ?? null)
-      if (session?.user) upsertProfile(session.user)
+      if (session?.user) {
+        upsertProfile(session.user)
+        
+        // Fetch user's tasks from Supabase
+        const { data: userTasks, error } = await supabase
+          .from('user_tasks')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('last_active_at', { ascending: false })
+        
+        if (!error && userTasks) {
+          // Show toast for unfinished tasks
+          const unfinishedTasks = userTasks.filter(task => !task.done)
+          unfinishedTasks.forEach(task => {
+            showToast(`Welcome back — you have an unfinished task: '${task.name}'. Continue or start fresh?`)
+          })
+          
+          // Merge cloud tasks with local tasks (cloud tasks take precedence)
+          setTasks(prevTasks => {
+            const mergedTasks = [...prevTasks]
+            
+            // Add or update cloud tasks
+            userTasks.forEach(cloudTask => {
+              const existingIndex = mergedTasks.findIndex(t => t.id === cloudTask.id)
+              if (existingIndex >= 0) {
+                // Update existing task with cloud data
+                mergedTasks[existingIndex] = {
+                  ...mergedTasks[existingIndex],
+                  ...cloudTask
+                }
+              } else {
+                // Add new cloud task
+                mergedTasks.push(cloudTask)
+              }
+            })
+            
+            return mergedTasks
+          })
+        }
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  // Sync tasks to Supabase when user is signed in
+  useEffect(() => {
+    if (!user || !tasks || tasks.length === 0) return
+    
+    const syncTasks = async () => {
+      try {
+        // Upsert each task to Supabase
+        const upsertPromises = tasks.map(task => 
+          supabase
+            .from('user_tasks')
+            .upsert({
+              id: task.id,
+              user_id: user.id,
+              name: task.name,
+              estimated_pomodoros: task.estimatedPomodoros || 1,
+              completed_pomodoros: task.completedPomodoros || 0,
+              done: task.done || false,
+              last_active_at: new Date().toISOString(),
+              created_at: task.createdAt || new Date().toISOString()
+            })
+            .select()
+        )
+        
+        await Promise.all(upsertPromises)
+      } catch (error) {
+        console.error('Error syncing tasks to Supabase:', error)
+      }
+    }
+    
+    syncTasks()
+  }, [tasks, user])
 
   useEffect(() => {
     if (!user) return
@@ -1250,10 +1334,15 @@ export default function App() {
       return
     }
     try {
+      const hasReferralDiscount = ls.get('pom_referral_discount_pending', false)
       const response = await fetch('/api/create-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, email: user.email }),
+        body: JSON.stringify({ 
+          userId: user.id, 
+          email: user.email,
+          applyReferralDiscount: hasReferralDiscount
+        }),
       })
       const data = await response.json()
       if (data.url) {
@@ -2198,6 +2287,7 @@ export default function App() {
       .nav-tab-label { font-size: 10px !important; padding: 5px 8px !important; }
       .header-logo { font-size: 22px !important; }
       .maintenance-banner { font-size: 9px !important; padding: 3px 8px !important; }
+      .stats-hero-grid { grid-template-columns: repeat(2, 1fr) !important; }
     }
 
     /* ── TABLET (481px to 768px) ── */
@@ -2400,7 +2490,7 @@ export default function App() {
     className="header-logo"
     style={{
       fontFamily: "'Caveat', cursive",
-      fontSize: 36,
+      fontSize: 'clamp(24px, 4vw, 36px)',
       fontWeight: 700,
       color: '#fff',
       userSelect: 'none',
@@ -2438,6 +2528,113 @@ export default function App() {
             >
               Guides
             </Link>
+            {!authLoading && !user && (
+              <button onClick={signIn}
+                style={{
+                  background: 'rgba(255,255,255,0.15)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  color: '#fff',
+                  padding: '7px 16px',
+                  borderRadius: 100,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}>
+                Sign In
+              </button>
+            )}
+            {!authLoading && user && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* Avatar element */}
+                <div
+                  onClick={() => setShowProfileEditor(true)}
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: '50%',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'rgba(255,255,255,0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    overflow: 'hidden',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.2)'
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'
+                  }}
+                >
+                  {user.user_metadata?.avatar_url ? (
+                    <img
+                      src={user.user_metadata.avatar_url}
+                      alt="Avatar"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                      }}
+                    />
+                  ) : (
+                    <span style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: 'rgba(255,255,255,0.8)',
+                    }}>
+                      {(user.user_metadata?.full_name || user.email || '').charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                
+                <button onClick={signOut}
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: 'rgba(255,255,255,0.7)',
+                    padding: '7px 14px',
+                    borderRadius: 100,
+                    fontSize: 11,
+                    cursor: 'pointer',
+                  }}>
+                  Sign Out
+                </button>
+              </div>
+            )}
+            {!isPro && (
+              <button
+                onClick={() => setShowUpgrade(true)}
+                style={{
+                  background: 'rgba(255,215,0,0.15)',
+                  border: '1px solid rgba(255,215,0,0.4)',
+                  color: '#FFD700',
+                  padding: '7px 14px',
+                  borderRadius: 100,
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  letterSpacing: 0.3,
+                }}>
+                ⚡ Upgrade
+              </button>
+            )}
+            {isPro && (
+              <span style={{
+                background: 'rgba(255,215,0,0.2)',
+                border: '1px solid rgba(255,215,0,0.4)',
+                color: '#FFD700',
+                padding: '4px 10px',
+                borderRadius: 100,
+                fontSize: 11,
+                fontWeight: 800,
+              }}>
+                PRO ✨
+              </span>
+            )}
             <button
               onClick={() => setIsDark(d => !d)}
               title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
@@ -2488,65 +2685,6 @@ export default function App() {
                 </svg>
               )}
             </button>
-            {!isPro && (
-              <button
-                onClick={() => setShowUpgrade(true)}
-                style={{
-                  background: 'rgba(255,215,0,0.15)',
-                  border: '1px solid rgba(255,215,0,0.4)',
-                  color: '#FFD700',
-                  padding: '7px 14px',
-                  borderRadius: 100,
-                  fontSize: 12,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  letterSpacing: 0.3,
-                }}>
-                ⚡ Upgrade
-              </button>
-            )}
-            {isPro && (
-              <span style={{
-                background: 'rgba(255,215,0,0.2)',
-                border: '1px solid rgba(255,215,0,0.4)',
-                color: '#FFD700',
-                padding: '4px 10px',
-                borderRadius: 100,
-                fontSize: 11,
-                fontWeight: 800,
-              }}>
-                PRO ✨
-              </span>
-            )}
-            {!user && (
-              <button onClick={signIn}
-                style={{
-                  background: 'rgba(255,255,255,0.15)',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  color: '#fff',
-                  padding: '7px 16px',
-                  borderRadius: 100,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}>
-                Sign In
-              </button>
-            )}
-            {user && (
-              <button onClick={signOut}
-                style={{
-                  background: 'rgba(255,255,255,0.08)',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  color: 'rgba(255,255,255,0.7)',
-                  padding: '7px 14px',
-                  borderRadius: 100,
-                  fontSize: 11,
-                  cursor: 'pointer',
-                }}>
-                Sign Out
-              </button>
-            )}
                         {[
               { icon:'?', tip:'Keyboard Shortcuts', fn:()=>setShowKeyHelp(true) },
             ].map(b => (
@@ -2583,22 +2721,18 @@ export default function App() {
                                   </div>
         </div>
 
-      {/* ══ MAINTENANCE BANNER ════════════════════════════════════════════════════════════ */}
-      <div className="maintenance-banner" style={{
-        width: '100%',
-        textAlign: 'center',
-        padding: '5px 16px',
-        background: 'rgba(0,0,0,0.25)',
-        backdropFilter: 'blur(8px)',
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: 1,
-        textTransform: 'uppercase',
-        color: '#FF3B3B',
-        flexShrink: 0,
-      }}>
-        🚧 We are actively working on improving this site - sorry for any inconvenience caused 🚧
-      </div>
+      {/* Tagline - visible only on timer tab */}
+      {tab === 'timer' && (
+        <div style={{
+          fontSize: 'clamp(11px, 2vw, 13px)',
+          color: 'rgba(255,255,255,0.55)',
+          letterSpacing: 0.5,
+          textAlign: 'center',
+          padding: '4px 0 8px',
+        }}>
+          Switch tasks without losing your place — each timer remembers exactly where it left off.
+        </div>
+      )}
 
       {/* ══ NAV TABS ════════════════════════════════════════════════════════════ */}
       <div className="nav-scroll" style={{ flexShrink: 0, padding: '6px 8px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
@@ -2653,7 +2787,7 @@ export default function App() {
               backdropFilter: 'blur(8px)',
               cursor: 'pointer',
             }}>
-            + Add {tab==='timer'?'Timer':'Stopwatch'}{!isPro && ' 🔒'}
+            + Add {tab==='timer'?'Timer':'Stopwatch'}{!isPro ? ' (Pro: up to 4) 🔒' : ''}
           </button>
         )}
 
@@ -2702,6 +2836,39 @@ export default function App() {
                 </span>
               </div>
             )}
+            
+            {/* Coach Chat Shortcut */}
+            <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+              <button
+                onClick={() => { setTab('stats'); setCoachChatOpen(true); }}
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 100,
+                  padding: '8px 18px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'rgba(255,255,255,0.75)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  margin: '0 auto',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.12)';
+                  e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                  e.currentTarget.style.color = 'rgba(255,255,255,0.75)';
+                }}
+              >
+                💬 Ask your coach
+              </button>
+            </div>
+            
             {/* Timer grid */}
             <div className="timer-grid" style={{
               display: 'grid',
@@ -2954,7 +3121,7 @@ export default function App() {
 
             {/* ── PAGE TITLE ── */}
             <div style={{ textAlign:'center', marginBottom:24 }}>
-              <div style={{ fontSize:13, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:4 }}>Daily Report</div>
+              <div style={{ fontSize:'clamp(11px, 2vw, 13px)', fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:4 }}>Daily Report</div>
               <div style={{ fontSize:11, color:'rgba(255,255,255,0.3)', letterSpacing:1 }}>{new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</div>
             </div>
             {activeFocusCount > 0 && (
@@ -2974,7 +3141,7 @@ export default function App() {
             <div style={{ maxWidth:700, margin:'0 auto', display:'flex', flexDirection:'column', gap:16 }}>
 
               {/* ── HERO STATS ROW ── */}
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+              <div className="stats-hero-grid" style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
                 {[
                   { icon:'⏱', label:'Focus Time', value: fmtTime(totalFocusSecs), sub: `${Math.floor(totalFocusSecs/3600)}h ${Math.floor((totalFocusSecs%3600)/60)}m` },
                   { icon:'☕', label:'Break Time', value: fmtTime(totalBreakSecs), sub: `${(totalBreakSecs/60).toFixed(0)} mins` },
@@ -2982,8 +3149,8 @@ export default function App() {
                   { icon:'🎯', label:'Focus Score', value: focusScore + '%', sub: focusScore >= 80 ? 'Excellent' : focusScore >= 60 ? 'Good' : focusScore >= 40 ? 'Fair' : 'Keep going' },
                 ].map(s => (
                   <div key={s.label} style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'14px 12px', textAlign:'center' }}>
-                    <div style={{ fontSize:20, marginBottom:4 }}>{s.icon}</div>
-                    <div style={{ fontSize:22, fontWeight:700, color:'#fff', fontFamily:"'Outfit',sans-serif", fontVariantNumeric:'tabular-nums' }}>{s.value}</div>
+                    <div style={{ fontSize:'clamp(16px, 2.5vw, 20px)', marginBottom:4 }}>{s.icon}</div>
+                    <div style={{ fontSize:'clamp(18px, 3vw, 22px)', fontWeight:700, color:'#fff', fontFamily:"'Outfit',sans-serif", fontVariantNumeric:'tabular-nums' }}>{s.value}</div>
                     <div style={{ fontSize:9, color:'rgba(255,255,255,0.45)', letterSpacing:1, textTransform:'uppercase', marginTop:2 }}>{s.label}</div>
                     <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:2 }}>{s.sub}</div>
                   </div>
@@ -2994,10 +3161,10 @@ export default function App() {
               <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
                   <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>Daily Goal</div>
+                    <div style={{ fontSize:'clamp(11px, 2vw, 13px)', fontWeight:700, color:'#fff' }}>Daily Goal</div>
                     <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', marginTop:2 }}>Target: {settings.dailyGoalHours}h of deep focus</div>
                   </div>
-                  <div style={{ fontSize:28, fontWeight:800, color:'#fff', fontFamily:"'Outfit',sans-serif" }}>
+                  <div style={{ fontSize:'clamp(20px, 4vw, 28px)', fontWeight:800, color:'#fff', fontFamily:"'Outfit',sans-serif" }}>
                     {Math.min(100, Math.round((totalFocusSecs / (settings.dailyGoalHours * 3600)) * 100))}%
                   </div>
                 </div>
@@ -3037,21 +3204,47 @@ export default function App() {
                     <div key={t.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0', borderBottom: i < timers.length-1 ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
                       <div style={{ width:32, height:32, borderRadius:'50%', background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:'#fff', flexShrink:0 }}>{i+1}</div>
                       <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontSize:13, fontWeight:600, color:'#fff', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.name}</div>
+                        <div style={{ fontSize:'clamp(11px, 2vw, 13px)', fontWeight:600, color:'#fff', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.name}</div>
                         <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:100, height:4 }}>
                           <div style={{ background:'rgba(255,255,255,0.6)', borderRadius:100, height:4, width:pct+'%', transition:'width 0.5s' }}/>
                         </div>
                       </div>
                       <div style={{ textAlign:'right', flexShrink:0 }}>
-                        <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{fmtTime(t.totalFocusSecs)}</div>
+                        <div style={{ fontSize:'clamp(11px, 2vw, 13px)', fontWeight:700, color:'#fff' }}>{fmtTime(t.totalFocusSecs)}</div>
                         <div style={{ fontSize:10, color:'rgba(255,255,255,0.4)' }}>{t.cyclesDone} cycles</div>
                       </div>
                     </div>
                   )
                 })}
                 {timers.every(t => t.totalFocusSecs === 0) && (
-                  <div style={{ textAlign:'center', padding:'20px 0', fontSize:13, color:'rgba(255,255,255,0.35)' }}>
+                  <div style={{ textAlign:'center', padding:'20px 0', fontSize:'clamp(11px, 2vw, 13px)', color:'rgba(255,255,255,0.35)' }}>
                     Start a timer to see your breakdown here
+                  </div>
+                )}
+              </div>
+
+              {/* ── BADGES EARNED ── */}
+              <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
+                <div style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:12 }}>Badges Earned</div>
+                {badges.length > 0 ? (
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                    {badges.map((badge, i) => (
+                      <div key={i} style={{
+                        background:'rgba(255,255,255,0.08)',
+                        border:'1px solid rgba(255,255,255,0.15)',
+                        borderRadius:100,
+                        padding:'6px 14px',
+                        fontSize:'clamp(11px, 2vw, 13px)',
+                        color:'rgba(255,255,255,0.9)',
+                        fontWeight:500,
+                      }}>
+                        {badge}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize:'clamp(11px, 2vw, 13px)', color:'rgba(255,255,255,0.35)', textAlign:'center', padding:'10px 0' }}>
+                    Complete sessions to start earning badges.
                   </div>
                 )}
               </div>
@@ -3063,7 +3256,7 @@ export default function App() {
                   <span style={{ fontSize:11, color:'rgba(255,255,255,0.4)' }}>{pendingTasks.length} remaining</span>
                 </div>
                 {tasks.length === 0 && (
-                  <div style={{ textAlign:'center', padding:'16px 0', fontSize:13, color:'rgba(255,255,255,0.35)' }}>No tasks yet — add one below</div>
+                  <div style={{ textAlign:'center', padding:'16px 0', fontSize:'clamp(11px, 2vw, 13px)', color:'rgba(255,255,255,0.35)' }}>No tasks yet — add one below</div>
                 )}
                 {tasks.map(task => (
                   <div key={task.id}
@@ -3072,7 +3265,7 @@ export default function App() {
                     <input type="checkbox" checked={task.done} onClick={e=>e.stopPropagation()}
                       onChange={e => setTasks(prev => prev.map(t => t.id===task.id?{...t,done:e.target.checked}:t))}
                       style={{ width:14, height:14, cursor:'pointer', flexShrink:0, accentColor:'rgba(255,255,255,0.8)' }}/>
-                    <span style={{ flex:1, fontSize:13, fontWeight:500, textDecoration:task.done?'line-through':'none', color:task.done?'rgba(255,255,255,0.3)':'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{task.name}</span>
+                    <span style={{ flex:1, fontSize:'clamp(11px, 2vw, 13px)', fontWeight:500, textDecoration:task.done?'line-through':'none', color:task.done?'rgba(255,255,255,0.3)':'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{task.name}</span>
                     <div style={{ display:'flex', gap:3, flexShrink:0 }}>
                       {Array(task.estimatedPomodoros||1).fill(0).map((_,i)=>(
                         <div key={i} style={{ width:6, height:6, borderRadius:'50%', background:i<(task.completedPomodoros||0)?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.15)' }}/>
@@ -3113,10 +3306,10 @@ export default function App() {
               <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px' }}>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: coachChatOpen ? 12 : 0 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    <div style={{ fontSize:18 }}>💬</div>
+                    <div style={{ fontSize:'clamp(14px, 2.5vw, 18px)' }}>💬</div>
                     <div>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>Ask Your Coach</div>
+                        <div style={{ fontSize:'clamp(11px, 2vw, 13px)', fontWeight:700, color:'#fff' }}>Ask Your Coach</div>
                         <span style={{ fontSize:9, background:'rgba(16,185,129,0.2)', border:'1px solid rgba(16,185,129,0.4)', color:'#6ee7b7', padding:'2px 8px', borderRadius:100, fontWeight:700, letterSpacing:0.5, marginLeft:8 }}>AI POWERED</span>
                         {!isPro && (() => {
                           const today = new Date().toDateString()
@@ -3265,9 +3458,9 @@ export default function App() {
               {/* ── INVITE FRIENDS ── */}
               <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px', textAlign:'center' }}>
                 <div style={{ fontSize:24, marginBottom:8 }}>🎁</div>
-                <div style={{ fontSize:14, fontWeight:700, color:'#fff', marginBottom:4 }}>Invite a friend, you both get Pro free</div>
+                <div style={{ fontSize:14, fontWeight:700, color:'#fff', marginBottom:4 }}>Invite a friend, you both get 50% off your first month</div>
                 <div style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginBottom:14, lineHeight:1.5 }}>
-                  When a friend signs up using your link, you each get 1 month of Pro — unlimited AI coach, all sounds, up to 4 timers, and more.
+                  When a friend signs up using your link and subscribes to Pro, you both get 50% off your first month. After that, regular pricing applies.
                 </div>
                 <button onClick={copyInviteLink}
                   style={{
@@ -3400,6 +3593,249 @@ export default function App() {
               style={{ width:'100%', background:bgColor, border:'none', color:'#fff', padding:14, borderRadius:10, fontSize:15, fontWeight:800, letterSpacing:.5 }}>
               OK
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══ PROFILE EDITOR MODAL ═══════════════════════════════════ */}
+      {showProfileEditor && user && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(10px)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={()=>setShowProfileEditor(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#1a1a2e', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:32, width:'90%', maxWidth:400, color:'#fff' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+              <h2 style={{ margin:0, fontSize:20, fontWeight:800 }}>Edit Profile</h2>
+              <button onClick={()=>setShowProfileEditor(false)} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.5)', fontSize:24, lineHeight:1 }}>×</button>
+            </div>
+
+            {/* Avatar preview */}
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', marginBottom:24 }}>
+              <div style={{
+                width: 80,
+                height: 80,
+                borderRadius: '50%',
+                border: '2px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                marginBottom: 16,
+              }}>
+                {user.user_metadata?.avatar_url ? (
+                  <img
+                    src={user.user_metadata.avatar_url}
+                    alt="Avatar"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                    }}
+                  />
+                ) : (
+                  <span style={{
+                    fontSize: 32,
+                    fontWeight: 600,
+                    color: 'rgba(255,255,255,0.8)',
+                  }}>
+                    {(user.user_metadata?.full_name || user.email || '').charAt(0).toUpperCase()}
+                  </span>
+                )}
+              </div>
+              
+              {/* Avatar upload button */}
+              <div>
+                <input
+                  type="file"
+                  id="avatar-upload"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const file = e.target.files[0]
+                    if (!file) return
+                    
+                    try {
+                      const fileExt = file.name.split('.').pop()
+                      const fileName = `${user.id}/avatar.${fileExt}`
+                      
+                      // Upload to Supabase Storage
+                      const { error: uploadError } = await supabase.storage
+                        .from('avatars')
+                        .upload(fileName, file, { upsert: true })
+                      
+                      if (uploadError) throw uploadError
+                      
+                      // Get public URL
+                      const { data: { publicUrl } } = supabase.storage
+                        .from('avatars')
+                        .getPublicUrl(fileName)
+                      
+                      // Update user metadata
+                      const { error: updateError } = await supabase.auth.updateUser({
+                        data: { avatar_url: publicUrl }
+                      })
+                      
+                      if (updateError) throw updateError
+                      
+                      // Update profiles table
+                      await supabase.from('profiles').upsert({
+                        id: user.id,
+                        avatar_url: publicUrl
+                      }, { onConflict: 'id' })
+                      
+                      showToast('Avatar updated successfully')
+                    } catch (error) {
+                      console.error('Error uploading avatar:', error)
+                      showToast('Failed to upload avatar')
+                    }
+                  }}
+                />
+                <label
+                  htmlFor="avatar-upload"
+                  style={{
+                    background: 'rgba(255,255,255,0.1)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: 'rgba(255,255,255,0.8)',
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    display: 'inline-block',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
+                    e.currentTarget.style.color = '#fff'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+                    e.currentTarget.style.color = 'rgba(255,255,255,0.8)'
+                  }}
+                >
+                  Change Photo
+                </label>
+              </div>
+            </div>
+
+            {/* Username input */}
+            <div style={{ marginBottom:24 }}>
+              <label style={{ display:'block', fontSize:12, fontWeight:700, letterSpacing:1.5, color:'rgba(255,255,255,0.5)', marginBottom:8 }}>
+                USERNAME
+              </label>
+              <input
+                type="text"
+                defaultValue={user.user_metadata?.full_name || user.email?.split('@')[0] || ''}
+                placeholder="Enter username"
+                style={{
+                  width: '100%',
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#fff',
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={e => {
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
+                }}
+                onBlur={e => {
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+                }}
+                id="profile-username-input"
+              />
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display:'flex', gap:12 }}>
+              <button
+                onClick={async () => {
+                  const usernameInput = document.getElementById('profile-username-input')
+                  const newUsername = usernameInput.value.trim()
+                  
+                  if (!newUsername) {
+                    showToast('Username cannot be empty')
+                    return
+                  }
+                  
+                  try {
+                    // Update profiles table
+                    const { error } = await supabase
+                      .from('profiles')
+                      .update({ username: newUsername })
+                      .eq('id', user.id)
+                    
+                    if (error) {
+                      if (error.code === '23505') { // Unique constraint violation
+                        showToast('That username is already taken — try another.')
+                      } else {
+                        throw error
+                      }
+                    } else {
+                      // Update user metadata
+                      await supabase.auth.updateUser({
+                        data: { full_name: newUsername }
+                      })
+                      
+                      showToast('Username updated successfully')
+                      setShowProfileEditor(false)
+                    }
+                  } catch (error) {
+                    console.error('Error updating username:', error)
+                    showToast('Failed to update username')
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  background: bgColor,
+                  border: 'none',
+                  color: '#fff',
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.opacity = '0.8'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.opacity = '1'
+                }}
+              >
+                Save
+              </button>
+              
+              <button
+                onClick={() => setShowProfileEditor(false)}
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: 'rgba(255,255,255,0.8)',
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+                  e.currentTarget.style.color = '#fff'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = 'rgba(255,255,255,0.8)'
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
