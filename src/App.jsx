@@ -2556,50 +2556,7 @@ export default function App() {
               Guides
             </Link>
             
-            {/* This control acts on timers[0] only. If multiple timers are visible (Pro users with 2+ timers),
-               this header toggle will only affect the first one — per-timer toggles would
-               need to move back to each TimerCard if that becomes confusing in practice. */}
-            <button
-              onClick={() => {
-                if (timers[0]?.running) return
-                setTimers(prev => prev.map((t, i) => 
-                  i === 0 
-                    ? { 
-                        ...t, 
-                        countUp: !t.countUp, 
-                        elapsed: !t.countUp ? 0 : t.elapsed,
-                        secsLeft: !t.countUp 
-                          ? t.secsLeft 
-                          : (t.mode === 'pomodoro' ? t.workMin : t.breakMin) * 60
-                      }
-                    : t
-                ))
-              }}
-              disabled={timers[0]?.running}
-              style={{
-                background: timers[0]?.countUp ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.2)',
-                color: timers[0]?.running ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.85)',
-                padding: '8px 14px',
-                borderRadius: 100,
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: timers[0]?.running ? 'not-allowed' : 'pointer',
-                opacity: timers[0]?.running ? 0.5 : 1,
-                transition: 'all 0.2s ease',
-              }}
-              onMouseEnter={e => {
-                if (!timers[0]?.running) {
-                  e.currentTarget.style.background = timers[0]?.countUp ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.2)'
-                }
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = timers[0]?.countUp ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)'
-              }}
-            >
-              {timers[0]?.countUp ? 'Counting Up' : 'Count Up'}
-            </button>
-            
+                        
             {!authLoading && !user && (
               <button onClick={signIn}
                 style={{
@@ -2787,7 +2744,9 @@ export default function App() {
               <span
                 title={`${streakFreezesLeft} streak freeze(s) left this month`}
                 style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.75)', marginLeft: 4, letterSpacing: 0.3, cursor: 'default' }}>
-                🔥 {streak}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 2 }}>
+                  <path d="M12 2c0 1.1-.9 2-2 2s-2-.9-2-2c0 2.2-1.8 4-4 4s-4-1.8-4-4c0 3.3 2.7 6 6 6s6-2.7 6-6c0 2.2-1.8 4-4 4s-4-1.8-4-4"/>
+                </svg> {streak}
               </span>
             )}
                                   </div>
@@ -2845,11 +2804,83 @@ export default function App() {
               backdropFilter: 'blur(8px)',
               cursor: 'pointer',
             }}>
-            + Add Timer{!isPro ? ' (Pro: up to 4) 🔒' : ''}
+            + Add Timer{!isPro ? ' 🔒' : ''}
           </button>
         )}
 
               </div>
+
+              {/* Pomodoro/Stopwatch toggle - only on timer tab */}
+              {tab === 'timer' && (
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'center', 
+                  alignItems: 'center', 
+                  marginTop: '8px',
+                  gap: 8 
+                }}>
+                  <span style={{ 
+                    fontSize: 10, 
+                    color: !timers[0]?.countUp ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                    fontWeight: 500,
+                    transition: 'color 0.2s ease'
+                  }}>
+                    Pomodoro
+                  </span>
+                  <div
+                    onClick={() => {
+                      if (timers[0]?.running) return
+                      setTimers(prev => prev.map((t, i) => 
+                        i === 0 
+                          ? { 
+                              ...t, 
+                              countUp: !t.countUp, 
+                              elapsed: !t.countUp ? 0 : t.elapsed,
+                              secsLeft: !t.countUp 
+                                ? t.secsLeft 
+                                : (t.mode === 'pomodoro' ? t.workMin : t.breakMin) * 60
+                            }
+                          : t
+                      ))
+                    }}
+                    style={{
+                      width: 64,
+                      height: 28,
+                      borderRadius: 100,
+                      background: 'rgba(255,255,255,0.12)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      position: 'relative',
+                      cursor: timers[0]?.running ? 'not-allowed' : 'pointer',
+                      opacity: timers[0]?.running ? 0.5 : 1,
+                      transition: 'opacity 0.2s ease',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: '50%',
+                        background: '#fff',
+                        position: 'absolute',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        left: timers[0]?.countUp ? 'auto' : 3,
+                        right: timers[0]?.countUp ? 3 : 'auto',
+                        transition: 'left 0.2s ease, right 0.2s ease',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      }}
+                    />
+                  </div>
+                  <span style={{ 
+                    fontSize: 10, 
+                    color: timers[0]?.countUp ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                    fontWeight: 500,
+                    transition: 'color 0.2s ease'
+                  }}>
+                    Stopwatch
+                  </span>
+                </div>
+              )}
 
       {/* ══ CONTENT ══════════════════════════════════════════════════════════════ */}
       <div style={{
@@ -2949,7 +2980,7 @@ export default function App() {
             </div>
 
             {/* Daily Insight Banner */}
-            {dailyInsightText && (
+            {user && dailyInsightText && (
               <div style={{
                 fontSize: 12,
                 color: 'rgba(255,255,255,0.45)',
@@ -2959,13 +2990,16 @@ export default function App() {
                 margin: '8px auto 0',
                 lineHeight: 1.4,
               }}>
-                <span style={{ fontSize: 12, marginRight: 6 }}>💡</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M12 1v6m0 6v6m4.22-13.78l-4.22 4.22m0 0l-4.22-4.22M20.78 7.22l-4.22 4.22m0 0l4.22 4.22M3.22 7.22l4.22 4.22m0 0l-4.22 4.22"/>
+                </svg>
                 {dailyInsightText}
               </div>
             )}
 
             {/* Coach Chat - collapsible on timer tab */}
-            <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'16px 20px', margin:'16px auto 0', maxWidth:420 }}>
+            <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'12px 24px', margin:'16px auto 0', maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 680 : 860 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: timerTabCoachOpen ? 12 : 0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                   <div style={{ fontSize:'clamp(14px, 2.5vw, 18px)' }}>💬</div>
@@ -2995,7 +3029,7 @@ export default function App() {
 
               {timerTabCoachOpen && (
                 <>
-                  <div style={{ maxHeight:280, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:12, paddingRight:4 }}>
+                  <div style={{ maxHeight:160, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:12, paddingRight:4 }}>
                     {coachMessages2.length === 0 && (
                       <div style={{ textAlign:'center', padding:'20px 10px', fontSize:12, color:'rgba(255,255,255,0.35)', lineHeight:1.6 }}>
                         👋 Hi! Tell me what you're working on, your deadline, or how you're feeling — I'll help you plan and stay motivated.
@@ -3242,10 +3276,10 @@ export default function App() {
               {/* ── HERO STATS ROW ── */}
               <div className="stats-hero-grid" style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
                 {[
-                  { icon:'⏱', label:'Focus Time', value: fmtTime(totalFocusSecs), sub: `${Math.floor(totalFocusSecs/3600)}h ${Math.floor((totalFocusSecs%3600)/60)}m` },
-                  { icon:'☕', label:'Break Time', value: fmtTime(totalBreakSecs), sub: `${(totalBreakSecs/60).toFixed(0)} mins` },
-                  { icon:'🔄', label:'Cycles Done', value: totalCycles, sub: `${settings.longBreakEvery - (totalCycles % settings.longBreakEvery)} to long break` },
-                  { icon:'🎯', label:'Focus Score', value: focusScore + '%', sub: focusScore >= 80 ? 'Excellent' : focusScore >= 60 ? 'Good' : focusScore >= 40 ? 'Fair' : 'Keep going' },
+                  { icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>, label:'Focus Time', value: fmtTime(totalFocusSecs), sub: `${Math.floor(totalFocusSecs/3600)}h ${Math.floor((totalFocusSecs%3600)/60)}m` },
+                  { icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 8h-1a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h1m-7-4h1m-1-4h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1z"/></svg>, label:'Break Time', value: fmtTime(totalBreakSecs), sub: `${(totalBreakSecs/60).toFixed(0)} mins` },
+                  { icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>, label:'Cycles Done', value: totalCycles, sub: `${settings.longBreakEvery - (totalCycles % settings.longBreakEvery)} to long break` },
+                  { icon:<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>, label:'Focus Score', value: focusScore + '%', sub: focusScore >= 80 ? 'Excellent' : focusScore >= 60 ? 'Good' : focusScore >= 40 ? 'Fair' : 'Keep going' },
                 ].map(s => (
                   <div key={s.label} style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'14px 12px', textAlign:'center' }}>
                     <div style={{ fontSize:'clamp(16px, 2.5vw, 20px)', marginBottom:4 }}>{s.icon}</div>
@@ -4008,7 +4042,11 @@ export default function App() {
                 </div>
                 {streak > 0 && (
                   <div>
-                    <div style={{ fontSize:20, fontWeight:700 }}>🔥 {streak}</div>
+                    <div style={{ fontSize:20, fontWeight:700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2c0 1.1-.9 2-2 2s-2-.9-2-2c0 2.2-1.8 4-4 4s-4-1.8-4-4c0 3.3 2.7 6 6 6s6-2.7 6-6c0 2.2-1.8 4-4 4s-4-1.8-4-4"/>
+                    </svg> {streak}
+                  </div>
                     <div style={{ fontSize:10, color:'rgba(255,255,255,0.45)' }}>day streak</div>
                   </div>
                 )}
