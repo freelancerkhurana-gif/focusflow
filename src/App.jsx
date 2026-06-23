@@ -1175,10 +1175,107 @@ export default function App() {
 
   // ── AI COACH CHAT ──
   const [coachChatOpen, setCoachChatOpen] = useState(false)
-  const [timerTabCoachOpen, setTimerTabCoachOpen] = useState(false)
+  const [floatingCoachOpen, setFloatingCoachOpen] = useState(false)
   const [coachMessages2, setCoachMessages2] = useState(() => ls.get('pom_coach_chat', []))
   const [coachInput, setCoachInput] = useState('')
   const [coachTyping, setCoachTyping] = useState(false)
+
+  // ── PRESET AVATARS ──
+  const presetAvatars = [
+    { id: 'avatar_1', bg: '#FF6B6B', shape: 'circle' },
+    { id: 'avatar_2', bg: '#4ECDC4', shape: 'square' },
+    { id: 'avatar_3', bg: '#45B7D1', shape: 'triangle' },
+    { id: 'avatar_4', bg: '#96CEB4', shape: 'hexagon' },
+    { id: 'avatar_5', bg: '#FFEAA7', shape: 'star' },
+    { id: 'avatar_6', bg: '#DDA0DD', shape: 'diamond' },
+    { id: 'avatar_7', bg: '#98D8C8', shape: 'circle' },
+    { id: 'avatar_8', bg: '#F7DC6F', shape: 'square' },
+    { id: 'avatar_9', bg: '#BB8FCE', shape: 'triangle' },
+    { id: 'avatar_10', bg: '#85C1E2', shape: 'hexagon' }
+  ]
+
+  const renderUserAvatar = (user) => {
+    const avatarUrl = user?.user_metadata?.avatar_url
+    if (avatarUrl && avatarUrl.startsWith('preset:')) {
+      const presetId = avatarUrl.replace('preset:', '')
+      const preset = presetAvatars.find(p => p.id === presetId)
+      if (preset) {
+        return (
+          <div style={{
+            width: '100%',
+            height: '100%',
+            borderRadius: '50%',
+            background: preset.bg,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+          }}>
+            {preset.shape === 'circle' && (
+              <div style={{
+                width: '40%',
+                height: '40%',
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.3)',
+              }}/>
+            )}
+            {preset.shape === 'square' && (
+              <div style={{
+                width: '35%',
+                height: '35%',
+                background: 'rgba(255,255,255,0.3)',
+                transform: 'rotate(45deg)',
+              }}/>
+            )}
+            {preset.shape === 'triangle' && (
+              <div style={{
+                width: 0,
+                height: 0,
+                borderLeft: '12px solid transparent',
+                borderRight: '12px solid transparent',
+                borderBottom: `20px solid rgba(255,255,255,0.3)`,
+              }}/>
+            )}
+            {preset.shape === 'hexagon' && (
+              <div style={{
+                width: '40%',
+                height: '40%',
+                background: 'rgba(255,255,255,0.3)',
+                clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
+              }}/>
+            )}
+            {preset.shape === 'star' && (
+              <div style={{
+                width: '40%',
+                height: '40%',
+                background: 'rgba(255,255,255,0.3)',
+                clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+              }}/>
+            )}
+            {preset.shape === 'diamond' && (
+              <div style={{
+                width: '35%',
+                height: '35%',
+                background: 'rgba(255,255,255,0.3)',
+                transform: 'rotate(45deg)',
+              }}/>
+            )}
+          </div>
+        )
+      }
+    }
+    
+    // Fallback to initial letter
+    return (
+      <span style={{
+        fontSize: 14,
+        fontWeight: 600,
+        color: 'rgba(255,255,255,0.8)',
+      }}>
+        {(user?.user_metadata?.full_name || user?.email || '').charAt(0).toUpperCase()}
+      </span>
+    )
+  }
 
   // ── MOOD TRACKING ──
   const [sessionMoods, setSessionMoods] = useState(() => ls.get('pom_session_moods', []))
@@ -1187,6 +1284,61 @@ export default function App() {
   const [inviteCopied, setInviteCopied] = useState(false)
   const [showReportCard, setShowReportCard] = useState(false)
   const reportCardRef = useRef(null)
+
+  // ── TIMER STATE SYNC ──
+  const [lastTimerStateSync, setLastTimerStateSync] = useState(null)
+  
+  // Debounced timer state sync
+  useEffect(() => {
+    if (!user || !timers[0]) return
+    
+    const timer = timers[0]
+    const activeTask = tasks.find(t => t.id === activeTaskId)
+    
+    // Create state object for comparison
+    const currentState = {
+      name: timer.name,
+      mode: timer.mode,
+      secsLeft: timer.secsLeft,
+      totalSecs: timer.totalSecs,
+      cyclesDone: timer.cyclesDone,
+      taskName: activeTask?.name ?? null
+    }
+    
+    // Skip if state hasn't changed meaningfully
+    if (lastTimerStateSync && 
+        lastTimerStateSync.name === currentState.name &&
+        lastTimerStateSync.mode === currentState.mode &&
+        Math.abs(lastTimerStateSync.secsLeft - currentState.secsLeft) < 5 && // Only sync if 5+ seconds difference
+        lastTimerStateSync.totalSecs === currentState.totalSecs &&
+        lastTimerStateSync.cyclesDone === currentState.cyclesDone &&
+        lastTimerStateSync.taskName === currentState.taskName) {
+      return
+    }
+    
+    // Debounced sync (only once every 10 seconds)
+    const timeoutId = setTimeout(async () => {
+      try {
+        const { error } = await supabase.from('user_timer_state').upsert({
+          user_id: user.id,
+          timer_name: currentState.name,
+          mode: currentState.mode,
+          secs_left: currentState.secsLeft,
+          total_secs: currentState.totalSecs,
+          cycles_done: currentState.cyclesDone,
+          task_name: currentState.taskName
+        }, { onConflict: 'user_id' })
+        
+        if (error) throw error
+        
+        setLastTimerStateSync(currentState)
+      } catch (error) {
+        console.error('Error syncing timer state:', error)
+      }
+    }, 10000) // 10 second debounce
+    
+    return () => clearTimeout(timeoutId)
+  }, [user, timers[0], activeTaskId, tasks, lastTimerStateSync])
 
   // ── THEME: background changes with timerMode ──
   const [isDark, setIsDark] = useState(() => {
@@ -1267,6 +1419,24 @@ export default function App() {
             
             return mergedTasks
           })
+        }
+
+        // Fetch user's timer state from Supabase
+        const { data: timerState, error: timerError } = await supabase
+          .from('user_timer_state')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .single()
+        
+        if (!timerError && timerState && timerState.secs_left > 0 && timerState.secs_left < timerState.total_secs) {
+          const timeLeft = timerState.mode === 'pomodoro' 
+            ? fmtTime(timerState.secs_left)
+            : fmtHMS(timerState.secs_left)
+          const taskContext = timerState.task_name 
+            ? ` on ${timerState.task_name}` 
+            : ' on no task'
+          
+          showToast(`Welcome back — you had '${timerState.timer_name}' at ${timeLeft} left${taskContext}. Resume or start fresh?`)
         }
       }
     })
@@ -2537,9 +2707,9 @@ export default function App() {
             <Link
               to="/blog"
               style={{
-                background: 'rgba(255,255,255,0.1)',
+                background: 'rgba(255,255,255,0.15)',
                 border: '1px solid rgba(255,255,255,0.2)',
-                color: 'rgba(255,255,255,0.85)',
+                color: '#e8e8ec',
                 padding: '8px 14px',
                 borderRadius: 100,
                 fontSize: 12,
@@ -2549,9 +2719,11 @@ export default function App() {
                 alignItems: 'center',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
+                backdropFilter: 'blur(16px)',
+                textShadow: '0 1px 2px rgba(0,0,0,0.6)'
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.25)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)' }}
             >
               Guides
             </Link>
@@ -2560,7 +2732,7 @@ export default function App() {
             {!authLoading && !user && (
               <button onClick={signIn}
                 style={{
-                  background: 'rgba(255,255,255,0.15)',
+                  background: 'rgba(255,255,255,0.2)',
                   border: '1px solid rgba(255,255,255,0.3)',
                   color: '#fff',
                   padding: '7px 16px',
@@ -2568,13 +2740,30 @@ export default function App() {
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
+                  backdropFilter: 'blur(16px)',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.6)'
                 }}>
                 Sign In
               </button>
             )}
             {!authLoading && user && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {/* Avatar element */}
+                <button onClick={signOut}
+                  style={{
+                    background: 'rgba(255,255,255,0.14)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: '#e8e8ec',
+                    padding: '7px 14px',
+                    borderRadius: 100,
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    backdropFilter: 'blur(16px)',
+                    textShadow: '0 1px 2px rgba(0,0,0,0.6)'
+                  }}>
+                  Sign Out
+                </button>
+                
+                {/* Avatar element - moved to last position */}
                 <div
                   onClick={() => setShowProfileEditor(true)}
                   style={{
@@ -2599,39 +2788,8 @@ export default function App() {
                     e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'
                   }}
                 >
-                  {user.user_metadata?.avatar_url ? (
-                    <img
-                      src={user.user_metadata.avatar_url}
-                      alt="Avatar"
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                      }}
-                    />
-                  ) : (
-                    <span style={{
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: 'rgba(255,255,255,0.8)',
-                    }}>
-                      {(user.user_metadata?.full_name || user.email || '').charAt(0).toUpperCase()}
-                    </span>
-                  )}
+                  {renderUserAvatar(user)}
                 </div>
-                
-                <button onClick={signOut}
-                  style={{
-                    background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    color: 'rgba(255,255,255,0.7)',
-                    padding: '7px 14px',
-                    borderRadius: 100,
-                    fontSize: 11,
-                    cursor: 'pointer',
-                  }}>
-                  Sign Out
-                </button>
               </div>
             )}
             {!isPro && (
@@ -2647,6 +2805,7 @@ export default function App() {
                   fontWeight: 800,
                   cursor: 'pointer',
                   letterSpacing: 0.3,
+                  textShadow: '0 1px 2px rgba(0,0,0,0.6)'
                 }}>
                 ⚡ Upgrade
               </button>
@@ -2672,9 +2831,9 @@ export default function App() {
                 height: 38,
                 borderRadius: '50%',
                 border: '1px solid rgba(255,255,255,0.2)',
-                background: 'rgba(255,255,255,0.1)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
+                background: 'rgba(255,255,255,0.16)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
                 color: '#fff',
                 display: 'flex',
                 alignItems: 'center',
@@ -2718,7 +2877,7 @@ export default function App() {
               { icon:'?', tip:'Keyboard Shortcuts', fn:()=>setShowKeyHelp(true) },
             ].map(b => (
               <button key={b.icon} className="icon-btn" onClick={b.fn} title={b.tip}
-                style={{ background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', width:38, height:38, borderRadius:'50%', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                style={{ background:'rgba(255,255,255,0.16)', border:'1px solid rgba(255,255,255,0.2)', color:'#fff', width:38, height:38, borderRadius:'50%', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(16px)' }}>
                 {b.icon}
               </button>
             ))}
@@ -2744,9 +2903,7 @@ export default function App() {
               <span
                 title={`${streakFreezesLeft} streak freeze(s) left this month`}
                 style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.75)', marginLeft: 4, letterSpacing: 0.3, cursor: 'default' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 2 }}>
-                  <path d="M12 2c0 1.1-.9 2-2 2s-2-.9-2-2c0 2.2-1.8 4-4 4s-4-1.8-4-4c0 3.3 2.7 6 6 6s6-2.7 6-6c0 2.2-1.8 4-4 4s-4-1.8-4-4"/>
-                </svg> {streak}
+                🔥 {streak}
               </span>
             )}
                                   </div>
@@ -2755,7 +2912,7 @@ export default function App() {
       {/* Tagline - visible only on timer tab */}
       {/* ══ NAV TABS ════════════════════════════════════════════════════════════ */}
       <div className="nav-scroll" style={{ flexShrink: 0, padding: '6px 8px 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
-        <div style={{ display:'flex', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius:100, padding:5, gap:2, backdropFilter: 'blur(12px)' }}>
+        <div style={{ display:'flex', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)', borderRadius:100, padding:5, gap:2, backdropFilter: 'blur(24px)' }}>
           {[{k:'timer',l:'Pomodoro'},{k:'sounds',l:'Sounds'},{k:'notes',l:'Notes'},{k:'stats',l:'Report'}].map(t => (
             <button key={t.k} className="tab-btn nav-tab-label" onClick={()=>setTab(t.k)}
               style={{
@@ -2764,7 +2921,7 @@ export default function App() {
                   : 'transparent',
                 color: tab===t.k
                   ? '#fff'
-                  : 'rgba(255,255,255,0.6)',
+                  : '#e8e8ec',
                 backdropFilter: tab===t.k ? 'blur(8px)' : 'none',
                 WebkitBackdropFilter: tab===t.k ? 'blur(8px)' : 'none',
                 border: tab===t.k
@@ -2775,7 +2932,8 @@ export default function App() {
                 borderRadius:100,
                 fontSize:12,
                 fontFamily: '"Outfit", sans-serif',
-                letterSpacing:.3
+                letterSpacing:.3,
+                textShadow: tab===t.k ? '0 1px 3px rgba(0,0,0,0.45)' : '0 1px 2px rgba(0,0,0,0.6)'
               }}>
               {t.l}
             </button>
@@ -2794,15 +2952,16 @@ export default function App() {
               addTimer()
             }}
             style={{
-              background: 'rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.14)',
               border: '1px solid rgba(255,255,255,0.2)',
-              color: 'rgba(255,255,255,0.8)',
-              padding: '6px 13px',
+              color: '#e8e8ec',
+              padding: '11px 13px',
               borderRadius: 100,
               fontSize: 12,
               fontWeight: 600,
-              backdropFilter: 'blur(8px)',
+              backdropFilter: 'blur(16px)',
               cursor: 'pointer',
+              textShadow: '0 1px 2px rgba(0,0,0,0.6)'
             }}>
             + Add Timer{!isPro ? ' 🔒' : ''}
           </button>
@@ -2998,87 +3157,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Coach Chat - collapsible on timer tab */}
-            <div style={{ background:'rgba(255,255,255,0.07)', backdropFilter:'blur(12px)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:'12px 24px', margin:'16px auto 0', maxWidth: timers.length === 1 ? 380 : timers.length === 2 ? 680 : 860 }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: timerTabCoachOpen ? 12 : 0 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <div style={{ fontSize:'clamp(14px, 2.5vw, 18px)' }}>💬</div>
-                  <div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <div style={{ fontSize:'clamp(11px, 2vw, 13px)', fontWeight:700, color:'#fff' }}>Ask Your Coach</div>
-                      <span style={{ fontSize:9, background:'rgba(16,185,129,0.2)', border:'1px solid rgba(16,185,129,0.4)', color:'#6ee7b7', padding:'2px 8px', borderRadius:100, fontWeight:700, letterSpacing:0.5, marginLeft:8 }}>AI POWERED</span>
-                      {!isPro && (() => {
-                        const today = new Date().toDateString()
-                        const usage = ls.get('pom_coach_usage', { date: today, count: 0 })
-                        const remaining = usage.date === today ? Math.max(0, 5 - usage.count) : 5
-                        return (
-                          <span style={{ fontSize:9, color:'rgba(255,255,255,0.4)', marginLeft:8 }}>
-                            {remaining}/5 free today
-                          </span>
-                        )
-                      })()}
-                    </div>
-                    <div style={{ fontSize:10, color:'rgba(255,255,255,0.35)', marginTop:1 }}>Plan tasks, get motivated, beat procrastination</div>
-                  </div>
-                </div>
-                <button onClick={()=>setTimerTabCoachOpen(o=>!o)}
-                  style={{ background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.18)', color:'#fff', borderRadius:100, padding:'6px 14px', fontSize:11, fontWeight:600, cursor:'pointer' }}>
-                  {timerTabCoachOpen ? 'Close' : 'Open Chat'}
-                </button>
-              </div>
-
-              {timerTabCoachOpen && (
-                <>
-                  <div style={{ maxHeight:160, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:12, paddingRight:4 }}>
-                    {coachMessages2.length === 0 && (
-                      <div style={{ textAlign:'center', padding:'20px 10px', fontSize:12, color:'rgba(255,255,255,0.35)', lineHeight:1.6 }}>
-                        👋 Hi! Tell me what you're working on, your deadline, or how you're feeling — I'll help you plan and stay motivated.
-                      </div>
-                    )}
-                    {coachMessages2.map((m,i) => (
-                      <div key={i} style={{
-                        alignSelf: m.role==='user' ? 'flex-end' : 'flex-start',
-                        maxWidth: '85%',
-                        background: m.role==='user' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)',
-                        border: m.role==='user' ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: 14,
-                        padding: '8px 12px',
-                        fontSize: 12,
-                        color: '#fff',
-                        lineHeight: 1.5,
-                      }}>
-                        {m.text}
-                      </div>
-                    ))}
-                    {coachTyping && (
-                      <div style={{ alignSelf:'flex-start', fontSize:11, color:'rgba(255,255,255,0.4)', padding:'4px 12px' }}>
-                        Thinking...
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display:'flex', gap:8 }}>
-                    <input
-                      value={coachInput}
-                      onChange={e=>setCoachInput(e.target.value)}
-                      onKeyDown={e=>{ if(e.key==='Enter') sendCoachMessage() }}
-                      placeholder="e.g. I have an exam tomorrow, help me plan"
-                      style={{ flex:1, background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:100, color:'#fff', fontSize:12, padding:'9px 16px', caretColor:'#fff' }}
-                    />
-                    <button onClick={sendCoachMessage}
-                      style={{ background:'rgba(255,255,255,0.2)', border:'1px solid rgba(255,255,255,0.3)', color:'#fff', borderRadius:100, padding:'9px 18px', fontSize:12, fontWeight:700, cursor:'pointer', flexShrink:0 }}>
-                      Send
-                    </button>
-                  </div>
-                  {coachMessages2.length > 0 && (
-                    <button onClick={()=>{ setCoachMessages2([]); ls.set('pom_coach_chat',[]) }}
-                      style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.3)', fontSize:10, marginTop:8, cursor:'pointer', padding:0 }}>
-                      Clear conversation
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-
+            
               
                         </div>
         )}
@@ -3754,99 +3833,121 @@ export default function App() {
                 overflow: 'hidden',
                 marginBottom: 16,
               }}>
-                {user.user_metadata?.avatar_url ? (
-                  <img
-                    src={user.user_metadata.avatar_url}
-                    alt="Avatar"
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                    }}
-                  />
-                ) : (
-                  <span style={{
-                    fontSize: 32,
-                    fontWeight: 600,
-                    color: 'rgba(255,255,255,0.8)',
-                  }}>
-                    {(user.user_metadata?.full_name || user.email || '').charAt(0).toUpperCase()}
-                  </span>
-                )}
+                {renderUserAvatar(user)}
               </div>
               
-              {/* Avatar upload button */}
-              <div>
-                <input
-                  type="file"
-                  id="avatar-upload"
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={async (e) => {
-                    const file = e.target.files[0]
-                    if (!file) return
-                    
-                    try {
-                      const fileExt = file.name.split('.').pop()
-                      const fileName = `${user.id}/avatar.${fileExt}`
-                      
-                      // Upload to Supabase Storage
-                      const { error: uploadError } = await supabase.storage
-                        .from('avatars')
-                        .upload(fileName, file, { upsert: true })
-                      
-                      if (uploadError) throw uploadError
-                      
-                      // Get public URL
-                      const { data: { publicUrl } } = supabase.storage
-                        .from('avatars')
-                        .getPublicUrl(fileName)
-                      
-                      // Update user metadata
-                      const { error: updateError } = await supabase.auth.updateUser({
-                        data: { avatar_url: publicUrl }
-                      })
-                      
-                      if (updateError) throw updateError
-                      
-                      // Update profiles table
-                      await supabase.from('profiles').upsert({
-                        id: user.id,
-                        avatar_url: publicUrl
-                      }, { onConflict: 'id' })
-                      
-                      showToast('Avatar updated successfully')
-                    } catch (error) {
-                      console.error('Error uploading avatar:', error)
-                      showToast('Failed to upload avatar')
-                    }
-                  }}
-                />
-                <label
-                  htmlFor="avatar-upload"
-                  style={{
-                    background: 'rgba(255,255,255,0.1)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    color: 'rgba(255,255,255,0.8)',
-                    padding: '8px 16px',
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                    display: 'inline-block',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.15)'
-                    e.currentTarget.style.color = '#fff'
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.8)'
-                  }}
-                >
-                  Change Photo
-                </label>
+              {/* Preset avatar selection */}
+              <div style={{ width: '100%' }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(5, 1fr)',
+                  gap: 12,
+                  marginBottom: 16,
+                }}>
+                  {presetAvatars.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={async () => {
+                        try {
+                          const avatarUrl = `preset:${preset.id}`
+                          
+                          // Update user metadata
+                          const { error: updateError } = await supabase.auth.updateUser({
+                            data: { avatar_url: avatarUrl }
+                          })
+                          
+                          if (updateError) throw updateError
+                          
+                          // Update profiles table
+                          await supabase.from('profiles').upsert({
+                            id: user.id,
+                            avatar_url: avatarUrl
+                          }, { onConflict: 'id' })
+                          
+                          showToast('Avatar updated successfully')
+                        } catch (error) {
+                          console.error('Error updating avatar:', error)
+                          showToast('Failed to update avatar')
+                        }
+                      }}
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: '50%',
+                        border: user.user_metadata?.avatar_url === `preset:${preset.id}` 
+                          ? '2px solid rgba(255,255,255,0.6)' 
+                          : '1px solid rgba(255,255,255,0.2)',
+                        background: preset.bg,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        position: 'relative',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.transform = 'scale(1.1)'
+                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.transform = 'scale(1)'
+                        e.currentTarget.style.borderColor = user.user_metadata?.avatar_url === `preset:${preset.id}` 
+                          ? 'rgba(255,255,255,0.6)' 
+                          : 'rgba(255,255,255,0.2)'
+                      }}
+                    >
+                      {preset.shape === 'circle' && (
+                        <div style={{
+                          width: '40%',
+                          height: '40%',
+                          borderRadius: '50%',
+                          background: 'rgba(255,255,255,0.3)',
+                        }}/>
+                      )}
+                      {preset.shape === 'square' && (
+                        <div style={{
+                          width: '35%',
+                          height: '35%',
+                          background: 'rgba(255,255,255,0.3)',
+                          transform: 'rotate(45deg)',
+                        }}/>
+                      )}
+                      {preset.shape === 'triangle' && (
+                        <div style={{
+                          width: 0,
+                          height: 0,
+                          borderLeft: '8px solid transparent',
+                          borderRight: '8px solid transparent',
+                          borderBottom: '12px solid rgba(255,255,255,0.3)',
+                        }}/>
+                      )}
+                      {preset.shape === 'hexagon' && (
+                        <div style={{
+                          width: '40%',
+                          height: '40%',
+                          background: 'rgba(255,255,255,0.3)',
+                          clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
+                        }}/>
+                      )}
+                      {preset.shape === 'star' && (
+                        <div style={{
+                          width: '40%',
+                          height: '40%',
+                          background: 'rgba(255,255,255,0.3)',
+                          clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+                        }}/>
+                      )}
+                      {preset.shape === 'diamond' && (
+                        <div style={{
+                          width: '35%',
+                          height: '35%',
+                          background: 'rgba(255,255,255,0.3)',
+                          transform: 'rotate(45deg)',
+                        }}/>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -4471,6 +4572,58 @@ export default function App() {
           </button>
         </div>
 
+      {/* Coach Chat Launcher - bottom right */}
+      <button
+        onClick={() => setFloatingCoachOpen(!floatingCoachOpen)}
+        title="Ask Your Coach"
+        style={{
+          position: 'fixed',
+          bottom: 76,
+          right: 20,
+          zIndex: 500,
+          width: 44,
+          height: 44,
+          borderRadius: '50%',
+          border: '1px solid rgba(255,255,255,0.25)',
+          background: 'rgba(255,255,255,0.12)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          color: '#fff',
+          fontSize: 18,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          transition: 'all 0.2s ease',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.32)'
+          e.currentTarget.style.transform = 'scale(1.08)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = 'rgba(255,255,255,0.12)'
+          e.currentTarget.style.transform = 'scale(1)'
+        }}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        {/* Unread indicator dot */}
+        {coachMessages2.length === 0 && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: '#4ade80',
+            border: '2px solid rgba(255,255,255,0.9)',
+          }}/>
+        )}
+      </button>
+
       {/* Focus Mode Button - bottom right */}
       <button
         className="focus-bottom-btn"
@@ -4512,6 +4665,162 @@ export default function App() {
       >
         ⛶
       </button>
+
+      {/* Floating Coach Chat Panel */}
+      {floatingCoachOpen && (
+        <div style={{
+          position: 'fixed',
+          bottom: 130,
+          right: 20,
+          width: 340,
+          maxHeight: 420,
+          background: 'rgba(255,255,255,0.08)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          border: '1px solid rgba(255,255,255,0.18)',
+          borderRadius: 20,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          zIndex: 600,
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 20px',
+            borderBottom: '1px solid rgba(255,255,255,0.1)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 18 }}>💬</div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Ask Your Coach</div>
+                  <span style={{ fontSize: 9, background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(16,185,129,0.4)', color: '#6ee7b7', padding: '2px 8px', borderRadius: 100, fontWeight: 700, letterSpacing: 0.5, marginLeft: 8 }}>AI POWERED</span>
+                  {!isPro && (() => {
+                    const today = new Date().toDateString()
+                    const usage = ls.get('pom_coach_usage', { date: today, count: 0 })
+                    const remaining = usage.date === today ? Math.max(0, 5 - usage.count) : 5
+                    return (
+                      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', marginLeft: 8 }}>
+                        {remaining}/5 free today
+                      </span>
+                    )
+                  })()}
+                </div>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>Plan tasks, get motivated, beat procrastination</div>
+              </div>
+            </div>
+            <button
+              onClick={() => setFloatingCoachOpen(false)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'rgba(255,255,255,0.5)',
+                fontSize: 20,
+                cursor: 'pointer',
+                padding: 0,
+                width: 24,
+                height: 24,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '50%',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+                e.currentTarget.style.color = 'rgba(255,255,255,0.8)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'rgba(255,255,255,0.5)'
+              }}
+            >
+              −
+            </button>
+          </div>
+
+          {/* Message List */}
+          <div style={{
+            maxHeight: 240,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            padding: '16px 20px',
+            flexGrow: 1,
+          }}>
+            {coachMessages2.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '20px 10px', fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 1.6 }}>
+                👋 Hi! Tell me what you're working on, your deadline, or how you're feeling — I'll help you plan and stay motivated.
+              </div>
+            )}
+            {coachMessages2.map((m, i) => (
+              <div key={i} style={{
+                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                maxWidth: '85%',
+                background: m.role === 'user' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)',
+                border: m.role === 'user' ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 14,
+                padding: '8px 12px',
+                fontSize: 12,
+                color: '#fff',
+                lineHeight: 1.5,
+              }}>
+                {m.text}
+              </div>
+            ))}
+            {coachTyping && (
+              <div style={{ alignSelf: 'flex-start', fontSize: 11, color: 'rgba(255,255,255,0.4)', padding: '4px 12px' }}>
+                Thinking...
+              </div>
+            )}
+          </div>
+
+          {/* Input Row */}
+          <div style={{
+            padding: '16px 20px',
+            borderTop: '1px solid rgba(255,255,255,0.1)',
+            display: 'flex',
+            gap: 8,
+          }}>
+            <input
+              value={coachInput}
+              onChange={e => setCoachInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') sendCoachMessage() }}
+              placeholder="e.g. I have an exam tomorrow, help me plan"
+              style={{
+                flex: 1,
+                background: 'rgba(0,0,0,0.2)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 100,
+                color: '#fff',
+                fontSize: 12,
+                padding: '9px 16px',
+                caretColor: '#fff',
+              }}
+            />
+            <button
+              onClick={sendCoachMessage}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: '1px solid rgba(255,255,255,0.3)',
+                color: '#fff',
+                borderRadius: 100,
+                padding: '9px 18px',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   </div>
   )
